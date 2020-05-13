@@ -32,6 +32,8 @@
 #  include <deal.II/fe/mapping.h>
 #  include <deal.II/fe/mapping_q1.h>
 
+#  include <deal.II/grid/filtered_iterator.h>
+
 #  include <deal.II/lac/affine_constraints.h>
 #  include <deal.II/lac/cuda_vector.h>
 #  include <deal.II/lac/la_parallel_vector.h>
@@ -82,6 +84,8 @@ namespace CUDAWrappers
   public:
     using jacobian_type = Tensor<2, dim, Tensor<1, dim, Number>>;
     using point_type    = Point<dim, Number>;
+    using CellFilter =
+      FilteredIterator<typename DoFHandler<dim>::active_cell_iterator>;
 
     /**
      * Parallelization scheme used: parallel_in_elem (parallelism at the level
@@ -338,6 +342,12 @@ namespace CUDAWrappers
     void
     initialize_dof_vector(
       LinearAlgebra::distributed::Vector<Number, MemorySpace::CUDA> &vec) const;
+
+    std::vector<std::vector<CellFilter>> const &
+    get_colored_graph() const
+    {
+      return graph;
+    }
 
     /**
      * Return the partitioner that represents the locally owned data and the
@@ -614,7 +624,8 @@ namespace CUDAWrappers
     /**
      * Pointer to the DoFHandler associated with the object.
      */
-    const DoFHandler<dim> *dof_handler;
+    const DoFHandler<dim> *              dof_handler;
+    std::vector<std::vector<CellFilter>> graph;
 
     friend class internal::ReinitHelper<dim, Number>;
   };
@@ -757,6 +768,42 @@ namespace CUDAWrappers
 
 #  endif
 
+  template <int dim>
+  inline unsigned int
+  q_point_id_in_cell_host(unsigned int const                   n_q_points_1d,
+                          std::array<unsigned int, dim> const &ijk)
+  {
+    return (dim == 1 ?
+              ijk[0] % n_q_points_1d :
+              dim == 2 ? ijk[0] % n_q_points_1d + n_q_points_1d * ijk[1] :
+                         ijk[0] % n_q_points_1d +
+                           n_q_points_1d * (ijk[1] + n_q_points_1d * ijk[2]));
+  }
+
+  template <int dim, typename Number>
+  inline unsigned int
+  local_q_point_id_host(
+    unsigned int const                                                  cell,
+    const typename dealii::CUDAWrappers::MatrixFree<dim, Number>::Data &data,
+    unsigned int const                   n_q_points_1d,
+    unsigned int const                   n_q_points,
+    std::array<unsigned int, dim> const &ijk)
+  {
+    return (data.row_start / data.padding_length + cell) * n_q_points +
+           q_point_id_in_cell_host<dim>(n_q_points_1d, ijk);
+  }
+
+  template <int dim, typename Number>
+  inline typename dealii::CUDAWrappers::MatrixFree<dim, Number>::point_type &
+  get_quadrature_point_host(
+    unsigned int const                                                  cell,
+    const typename dealii::CUDAWrappers::MatrixFree<dim, Number>::Data &data,
+    unsigned int const                   n_q_points_1d,
+    std::array<unsigned int, dim> const &ijk)
+  {
+    return *(data.q_points + data.padding_length * cell +
+             q_point_id_in_cell_host<dim>(n_q_points_1d, ijk));
+  }
 } // namespace CUDAWrappers
 
 DEAL_II_NAMESPACE_CLOSE
