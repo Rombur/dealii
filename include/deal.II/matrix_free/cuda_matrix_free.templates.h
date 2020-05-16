@@ -966,6 +966,7 @@ namespace CUDAWrappers
           }
         else
           {
+            graph.clear();
             if (additional_data.overlap_communication_computation)
               {
                 // We create one color (1) with the cells on the boundary of the

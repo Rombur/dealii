@@ -19,24 +19,22 @@
 
 #include <deal.II/base/config.h>
 
-#ifdef DEAL_II_COMPILER_CUDA_AWARE
+#include <deal.II/base/cuda_size.h>
+#include <deal.II/base/mpi.h>
+#include <deal.II/base/quadrature.h>
+#include <deal.II/base/tensor.h>
 
-#  include <deal.II/base/cuda_size.h>
-#  include <deal.II/base/mpi.h>
-#  include <deal.II/base/quadrature.h>
-#  include <deal.II/base/tensor.h>
+#include <deal.II/dofs/dof_handler.h>
 
-#  include <deal.II/dofs/dof_handler.h>
+#include <deal.II/fe/fe_update_flags.h>
+#include <deal.II/fe/mapping.h>
+#include <deal.II/fe/mapping_q1.h>
 
-#  include <deal.II/fe/fe_update_flags.h>
-#  include <deal.II/fe/mapping.h>
-#  include <deal.II/fe/mapping_q1.h>
+#include <deal.II/grid/filtered_iterator.h>
 
-#  include <deal.II/grid/filtered_iterator.h>
-
-#  include <deal.II/lac/affine_constraints.h>
-#  include <deal.II/lac/cuda_vector.h>
-#  include <deal.II/lac/la_parallel_vector.h>
+#include <deal.II/lac/affine_constraints.h>
+#include <deal.II/lac/cuda_vector.h>
+#include <deal.II/lac/la_parallel_vector.h>
 
 
 DEAL_II_NAMESPACE_OPEN
@@ -44,13 +42,13 @@ DEAL_II_NAMESPACE_OPEN
 namespace CUDAWrappers
 {
   // forward declaration
-#  ifndef DOXYGEN
+#ifndef DOXYGEN
   namespace internal
   {
     template <int dim, typename Number>
     class ReinitHelper;
   }
-#  endif
+#endif
 
   /**
    * This class collects all the data that is stored for the matrix free
@@ -118,12 +116,12 @@ namespace CUDAWrappers
         , use_coloring(use_coloring)
         , overlap_communication_computation(overlap_communication_computation)
       {
-#  ifndef DEAL_II_MPI_WITH_CUDA_SUPPORT
+#ifndef DEAL_II_MPI_WITH_CUDA_SUPPORT
         AssertThrow(
           overlap_communication_computation == false,
           ExcMessage(
             "Overlapping communication and computation requires CUDA-aware MPI."));
-#  endif
+#endif
         if (overlap_communication_computation == true)
           AssertThrow(
             use_coloring == false || overlap_communication_computation == false,
@@ -666,6 +664,8 @@ namespace CUDAWrappers
 
 
 
+#ifdef DEAL_II_COMPILER_CUDA_AWARE
+
   // This function determines the number of cells per block, possibly at compile
   // time (by virtue of being 'constexpr')
   // TODO this function should be rewritten using meta-programming
@@ -744,6 +744,7 @@ namespace CUDAWrappers
     return *(data->q_points + data->padding_length * cell +
              q_point_id_in_cell<dim>(n_q_points_1d));
   }
+#endif
 
 
   /*----------------------- Inline functions ---------------------------------*/
@@ -807,7 +808,5 @@ namespace CUDAWrappers
 } // namespace CUDAWrappers
 
 DEAL_II_NAMESPACE_CLOSE
-
-#endif
 
 #endif
