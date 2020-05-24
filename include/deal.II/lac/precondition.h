@@ -2163,8 +2163,19 @@ namespace internal
       const auto n_local_elements = vector.local_size();
       const int  n_blocks =
         1 + (n_local_elements - 1) / CUDAWrappers::block_size;
+#    ifndef DEAL_II_WITH_HIP
       set_initial_guess_kernel<<<n_blocks, CUDAWrappers::block_size>>>(
         first_local_range, n_local_elements, vector.get_values());
+#    else
+      hipLaunchKernelGGL(set_initial_guess_kernel,
+                         n_blocks,
+                         CUDAWrappers::block_size,
+                         0,
+                         0,
+                         first_local_range,
+                         n_local_elements,
+                         vector.get_values());
+#    endif
       AssertCudaKernel();
 
       const Number mean_value = vector.mean_value();

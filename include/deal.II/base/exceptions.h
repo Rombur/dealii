@@ -23,9 +23,11 @@
 #include <string>
 #include <type_traits>
 
-#ifdef DEAL_II_WITH_CUDA
-#  include <cusolverSp.h>
-#  include <cusparse.h>
+#ifdef DEAL_II_COMPILER_CUDA_AWARE
+#  ifndef DEAL_II_WITH_HIP
+#    include <cusolverSp.h>
+#    include <cusparse.h>
+#  endif
 #endif
 
 
@@ -1125,7 +1127,7 @@ namespace StandardExceptions
     "if deal.II was configured to use Assimp, but cmake did not "
     "find a valid Assimp library.");
 
-#ifdef DEAL_II_WITH_CUDA
+#ifdef DEAL_II_COMPILER_CUDA_AWARE
   /**
    * This exception is raised if an error happened in a CUDA kernel.
    *
@@ -1365,7 +1367,8 @@ namespace deal_II_exceptions
       // another function:
       do_issue_error_nothrow(e);
     }
-#ifdef DEAL_II_WITH_CUDA
+#ifdef DEAL_II_COMPILER_CUDA_AWARE
+#  ifndef DEAL_II_WITH_HIP
     /**
      * Return a string given an error code. This is similar to the
      * cudaGetErrorString function but there is no equivalent function for
@@ -1381,6 +1384,7 @@ namespace deal_II_exceptions
      */
     std::string
     get_cusolver_error_string(const cusolverStatus_t error_code);
+#  endif
 #endif
   } /*namespace internals*/
 
@@ -1711,7 +1715,7 @@ namespace internal
     {}
 #endif // DEAL_II_WITH_MPI
 
-#ifdef DEAL_II_WITH_CUDA
+#ifdef DEAL_II_COMPILER_CUDA_AWARE
 /**
  * An assertion that checks that the error code produced by calling a CUDA
  * routine is equal to cudaSuccess.

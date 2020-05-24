@@ -21,9 +21,13 @@
 #include <deal.II/base/exceptions.h>
 
 #ifdef DEAL_II_COMPILER_CUDA_AWARE
-#  include <cusolverDn.h>
-#  include <cusolverSp.h>
-#  include <cusparse.h>
+#  ifndef DEAL_II_WITH_HIP
+#    include <cusolverDn.h>
+#    include <cusolverSp.h>
+#    include <cusparse.h>
+#  else
+#    include <hip/hip_runtime.h>
+#  endif
 
 #  include <vector>
 
@@ -57,6 +61,7 @@ namespace Utilities
        */
       ~Handle();
 
+#  ifndef DEAL_II_WITH_HIP
       /**
        * Pointer to an opaque cuSolverDN context.
        * The handle must be passed to every cuSolverDN library function.
@@ -74,6 +79,7 @@ namespace Utilities
        * The handle must be passed to every cuSPARSE library function.
        */
       cusparseHandle_t cusparse_handle;
+#  endif
     };
 
     /**

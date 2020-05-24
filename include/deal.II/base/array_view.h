@@ -314,6 +314,7 @@ namespace internal
                     "the only possible memory space is 'MemorySpace::Host'!");
       return true;
 #else
+#  ifndef DEAL_II_WITH_HIP
       cudaPointerAttributes attributes;
       const cudaError_t cuda_error = cudaPointerGetAttributes(&attributes, ptr);
       if (cuda_error != cudaErrorInvalidValue)
@@ -330,6 +331,10 @@ namespace internal
           cudaGetLastError();
           return std::is_same<MemorySpaceType, MemorySpace::Host>::value;
         }
+#  else
+      (void)ptr;
+      return true;
+#  endif
 #endif
     }
   } // namespace ArrayViewHelper

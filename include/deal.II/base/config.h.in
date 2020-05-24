@@ -44,6 +44,7 @@
 #cmakedefine DEAL_II_WITH_GSL
 #cmakedefine DEAL_II_WITH_GMSH
 #cmakedefine DEAL_II_WITH_HDF5
+#cmakedefine DEAL_II_WITH_HIP
 #cmakedefine DEAL_II_WITH_LAPACK
 #cmakedefine LAPACK_WITH_64BIT_BLAS_INDICES
 #cmakedefine DEAL_II_LAPACK_WITH_MKL
@@ -91,6 +92,10 @@
  * understands CUDA code.
  */
 #if defined(DEAL_II_WITH_CUDA) && defined(__CUDACC__)
+#  define DEAL_II_COMPILER_CUDA_AWARE
+#endif
+
+#if defined(DEAL_II_WITH_HIP) && defined(__HIPCC__)
 #  define DEAL_II_COMPILER_CUDA_AWARE
 #endif
 

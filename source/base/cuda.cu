@@ -30,6 +30,7 @@ namespace Utilities
   {
     Handle::Handle()
     {
+#ifndef DEAL_II_WITH_HIP
       cusolverStatus_t cusolver_error_code =
         cusolverDnCreate(&cusolver_dn_handle);
       AssertCusolver(cusolver_error_code);
@@ -39,12 +40,14 @@ namespace Utilities
 
       cusparseStatus_t cusparse_error_code = cusparseCreate(&cusparse_handle);
       AssertCusparse(cusparse_error_code);
+#endif
     }
 
 
 
     Handle::~Handle()
     {
+#ifndef DEAL_II_WITH_HIP
       cusolverStatus_t cusolver_error_code =
         cusolverDnDestroy(cusolver_dn_handle);
       AssertCusolver(cusolver_error_code);
@@ -54,6 +57,7 @@ namespace Utilities
 
       cusparseStatus_t cusparse_error_code = cusparseDestroy(cusparse_handle);
       AssertCusparse(cusparse_error_code);
+#endif
     }
   } // namespace CUDA
 } // namespace Utilities

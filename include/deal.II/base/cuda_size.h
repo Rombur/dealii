@@ -37,7 +37,11 @@ namespace CUDAWrappers
   /**
    * Define the number of threads in a warp.
    */
+#ifdef DEAL_II_WITH_HIP
+  constexpr int warp_size = 64;
+#else
   constexpr int warp_size = 32;
+#endif
 } // namespace CUDAWrappers
 
 DEAL_II_NAMESPACE_CLOSE
