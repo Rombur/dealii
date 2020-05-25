@@ -31,6 +31,10 @@
 #  include <adolc/adouble.h> // Taped double
 #endif
 
+#ifdef DEAL_II_WITH_HIP
+#  include <hip/hip_runtime.h>
+#endif
+
 #include <cmath>
 #include <ostream>
 #include <utility>
@@ -915,11 +919,11 @@ Tensor<0, dim, Number>::end_raw() const
 
 
 template <int dim, typename Number>
-DEAL_II_CONSTEXPR inline DEAL_II_ALWAYS_INLINE
-  DEAL_II_CUDA_HOST_DEV Tensor<0, dim, Number>::operator Number &()
+DEAL_II_CONSTEXPR inline DEAL_II_ALWAYS_INLINE DEAL_II_CUDA_HOST_DEV
+Tensor<0, dim, Number>::operator Number &()
 {
   // We cannot use Assert inside a CUDA kernel
-#  ifndef __CUDA_ARCH__
+#  if !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
   Assert(dim != 0,
          ExcMessage("Cannot access an object of type Tensor<0,0,Number>"));
 #  endif
@@ -932,7 +936,7 @@ DEAL_II_CONSTEXPR inline DEAL_II_ALWAYS_INLINE
   DEAL_II_CUDA_HOST_DEV Tensor<0, dim, Number>::operator const Number &() const
 {
   // We cannot use Assert inside a CUDA kernel
-#  ifndef __CUDA_ARCH__
+#  if !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
   Assert(dim != 0,
          ExcMessage("Cannot access an object of type Tensor<0,0,Number>"));
 #  endif
@@ -1034,7 +1038,7 @@ namespace internal
       val *= s;
     }
 
-#  ifdef __CUDA_ARCH__
+#  if !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
     template <typename Number, typename OtherNumber>
     DEAL_II_CONSTEXPR inline DEAL_II_ALWAYS_INLINE DEAL_II_CUDA_HOST_DEV void
                                                    multiply_assign_scalar(std::complex<Number> &, const OtherNumber &)
@@ -1093,7 +1097,7 @@ DEAL_II_CONSTEXPR DEAL_II_CUDA_HOST_DEV inline DEAL_II_ALWAYS_INLINE
   Tensor<0, dim, Number>::norm_square() const
 {
   // We cannot use Assert inside a CUDA kernel
-#  ifndef __CUDA_ARCH__
+#  if !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
   Assert(dim != 0,
          ExcMessage("Cannot access an object of type Tensor<0,0,Number>"));
 #  endif
@@ -1198,7 +1202,7 @@ namespace internal
                                       std::integral_constant<int, dim>)
     {
       // We cannot use Assert in a CUDA kernel
-#  ifndef __CUDA_ARCH__
+#  if !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
       AssertIndexRange(i, dim);
 #  endif
       return values[i];
@@ -1226,7 +1230,7 @@ namespace internal
                                       std::integral_constant<int, 0>)
     {
       // We cannot use Assert in a CUDA kernel
-#  ifndef __CUDA_ARCH__
+#  if !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
       Assert(
         false,
         ExcMessage(
@@ -1496,7 +1500,11 @@ template <int rank_, int dim, typename Number>
 inline typename numbers::NumberTraits<Number>::real_type
 Tensor<rank_, dim, Number>::norm() const
 {
+#  ifdef __HIP_DEVICE_COMPILE__
+  return sqrt(norm_square());
+#  else
   return std::sqrt(norm_square());
+#  endif
 }
 
 

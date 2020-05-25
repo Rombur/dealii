@@ -27,6 +27,10 @@ DEAL_II_DISABLE_EXTRA_DIAGNOSTICS
 #include <boost/geometry/geometries/point.hpp>
 DEAL_II_ENABLE_EXTRA_DIAGNOSTICS
 
+#ifdef DEAL_II_WITH_HIP
+#  include <hip/hip_runtime.h>
+#endif
+
 #include <cmath>
 
 DEAL_II_NAMESPACE_OPEN
@@ -363,7 +367,7 @@ template <int dim, typename Number>
 inline DEAL_II_CUDA_HOST_DEV
 Point<dim, Number>::Point(const Number x)
 {
-#  ifndef __CUDA_ARCH__
+#  if !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
   Assert(dim == 1,
          ExcMessage(
            "You can only initialize Point<1> objects using the constructor "
@@ -391,7 +395,7 @@ template <int dim, typename Number>
 inline DEAL_II_CUDA_HOST_DEV
 Point<dim, Number>::Point(const Number x, const Number y)
 {
-#  ifndef __CUDA_ARCH__
+#  if !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
   Assert(dim == 2,
          ExcMessage(
            "You can only initialize Point<2> objects using the constructor "
@@ -414,7 +418,7 @@ template <int dim, typename Number>
 inline DEAL_II_CUDA_HOST_DEV
 Point<dim, Number>::Point(const Number x, const Number y, const Number z)
 {
-#  ifndef __CUDA_ARCH__
+#  if !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
   Assert(dim == 3,
          ExcMessage(
            "You can only initialize Point<3> objects using the constructor "
@@ -471,7 +475,7 @@ template <int dim, typename Number>
 inline DEAL_II_CUDA_HOST_DEV Number
 Point<dim, Number>::operator()(const unsigned int index) const
 {
-#  ifndef __CUDA_ARCH__
+#  if !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
   AssertIndexRange(index, dim);
 #  endif
   return this->values[index];
@@ -483,7 +487,7 @@ template <int dim, typename Number>
 inline DEAL_II_CUDA_HOST_DEV Number &
 Point<dim, Number>::operator()(const unsigned int index)
 {
-#  ifndef __CUDA_ARCH__
+#  if !(defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))
   AssertIndexRange(index, dim);
 #  endif
   return this->values[index];
@@ -603,7 +607,11 @@ template <int dim, typename Number>
 inline DEAL_II_CUDA_HOST_DEV typename numbers::NumberTraits<Number>::real_type
 Point<dim, Number>::distance(const Point<dim, Number> &p) const
 {
+#  ifdef __HIP_DEVICE_COMPILE__
+  return sqrt(distance_square(p));
+#  else
   return std::sqrt(distance_square(p));
+#  endif
 }
 
 
