@@ -1034,9 +1034,169 @@ namespace CUDAWrappers
     IndexSet locally_relevant_dofs;
     if (comm)
       {
+        const auto &locally_owned_dofs = dof_handler->locally_owned_dofs();
+        locally_relevant_dofs.set_size(locally_owned_dofs.size());
+        IndexSet locally_relevant_dofs_extended(locally_owned_dofs.size());
+        const unsigned int n_dofs_per_cell =
+          dof_handler->get_fe().n_dofs_per_cell();
+        std::vector<types::global_dof_index> local_dof_indices(n_dofs_per_cell);
+        const unsigned int                   n_dofs_1d = fe_degree + 1;
+        const unsigned int                   n_dofs_per_face =
+          Utilities::fixed_power<dim - 1>(n_dofs_1d);
+        std::vector<types::global_dof_index> neighbor_dofs(n_dofs_per_face);
+
+
+
+        using cell_iterator = typename DoFHandler<dim>::cell_iterator;
+        const unsigned int n_raw_lines(
+          dof_handler->get_triangulation().n_raw_lines());
+        std::vector<std::vector<std::pair<cell_iterator, unsigned int>>>
+          line_to_cells(dim == 3 ? n_raw_lines : 0);
+        if (dim == 3)
+          {
+            // In 3D, we can have DoFs on only an edge being constrained (e.g.
+            // in a cartesian 2x2x2 grid, where only the upper left 2 cells are
+            // refined). This sets up a helper data structure in the form of a
+            // mapping from edges (i.e. lines) to neighboring cells.
+
+            // Mapping from an edge to which children that share that edge.
+            const unsigned int line_to_children[12][2] = {{0, 2},
+                                                          {1, 3},
+                                                          {0, 1},
+                                                          {2, 3},
+                                                          {4, 6},
+                                                          {5, 7},
+                                                          {4, 5},
+                                                          {6, 7},
+                                                          {0, 4},
+                                                          {1, 5},
+                                                          {2, 6},
+                                                          {3, 7}};
+
+            std::vector<std::vector<std::pair<cell_iterator, unsigned int>>>
+              line_to_inactive_cells(n_raw_lines);
+
+            // First add active and inactive cells to their lines:
+            for (const auto &cell : dof_handler->cell_iterators())
+              {
+                for (unsigned int line = 0;
+                     line < GeometryInfo<3>::lines_per_cell;
+                     ++line)
+                  {
+                    const unsigned int line_idx = cell->line(line)->index();
+                    if (cell->is_active())
+                      line_to_cells[line_idx].push_back(
+                        std::make_pair(cell, line));
+                    else
+                      line_to_inactive_cells[line_idx].push_back(
+                        std::make_pair(cell, line));
+                  }
+              }
+
+            // Now, we can access edge-neighboring active cells on same level to
+            // also access of an edge to the edges "children". These are found
+            // from looking at the corresponding edge of children of inactive
+            // edge neighbors.
+            for (unsigned int line_idx = 0; line_idx < n_raw_lines; ++line_idx)
+              {
+                if ((line_to_cells[line_idx].size() > 0) &&
+                    line_to_inactive_cells[line_idx].size() > 0)
+                  {
+                    // We now have cells to add (active ones) and edges to which
+                    // they should be added (inactive cells).
+                    const cell_iterator &inactive_cell =
+                      line_to_inactive_cells[line_idx][0].first;
+                    const unsigned int neighbor_line =
+                      line_to_inactive_cells[line_idx][0].second;
+
+                    for (unsigned int c = 0; c < 2; ++c)
+                      {
+                        const cell_iterator &child = inactive_cell->child(
+                          line_to_children[neighbor_line][c]);
+                        const unsigned int child_line_idx =
+                          child->line(neighbor_line)->index();
+
+                        // Now add all active cells
+                        for (const auto cl : line_to_cells[line_idx])
+                          line_to_cells[child_line_idx].push_back(cl);
+                      }
+                  }
+              }
+          }
+
+
+
+        for (auto cell : dof_handler->active_cell_iterators())
+          {
+            if (cell->is_locally_owned())
+              {
+                cell->get_dof_indices(local_dof_indices);
+                for (unsigned int i = 0; i < n_dofs_per_cell; ++i)
+                  {
+                    locally_relevant_dofs.add_index(local_dof_indices[i]);
+                    locally_relevant_dofs_extended.add_index(
+                      local_dof_indices[i]);
+                  }
+                for (const unsigned int face :
+                     GeometryInfo<dim>::face_indices())
+                  {
+                    if ((!cell->at_boundary(face)) &&
+                        (cell->neighbor(face)->has_children() == false))
+                      {
+                        const auto &neighbor = cell->neighbor(face);
+
+                        // Neighbor is coarser than us, i.e., face is
+                        // constrained
+                        if (neighbor->level() < cell->level())
+                          {
+                            neighbor->get_dof_indices(local_dof_indices);
+                            for (unsigned int i = 0; i < n_dofs_per_cell; ++i)
+                              {
+                                locally_relevant_dofs.add_index(
+                                  local_dof_indices[i]);
+                                locally_relevant_dofs_extended.add_index(
+                                  local_dof_indices[i]);
+                              }
+                          }
+                      }
+                  }
+                if (dim == 3)
+                  for (unsigned int local_line = 0;
+                       local_line < GeometryInfo<dim>::lines_per_cell;
+                       ++local_line)
+                    {
+                      // For each cell which share that edge
+                      const unsigned int line = cell->line(local_line)->index();
+                      for (const auto edge_neighbor : line_to_cells[line])
+                        {
+                          // If one of them is coarser than us
+                          const auto neighbor_cell = edge_neighbor.first;
+                          if (neighbor_cell->level() < cell->level())
+                            {
+                              neighbor_cell->get_dof_indices(local_dof_indices);
+                              for (unsigned int i = 0; i < n_dofs_per_cell; ++i)
+                                {
+                                  locally_relevant_dofs_extended.add_index(
+                                    local_dof_indices[i]);
+                                }
+                            }
+                        }
+                    }
+              }
+          }
+
+        locally_relevant_dofs.compress();
+        locally_relevant_dofs_extended.compress();
+        IndexSet locally_relevant_dofs_full;
         DoFTools::extract_locally_relevant_dofs(*dof_handler,
-                                                locally_relevant_dofs);
-        partitioner = std::make_shared<Utilities::MPI::Partitioner>(
+                                                locally_relevant_dofs_full);
+        locally_owned_dofs.print(std::cout);
+        locally_relevant_dofs.print(std::cout);
+        locally_relevant_dofs_extended.print(std::cout);
+        locally_relevant_dofs_full.print(std::cout);
+
+        locally_relevant_dofs = locally_relevant_dofs_extended;
+        partitioner           = std::make_shared<Utilities::MPI::Partitioner>(
           dof_handler->locally_owned_dofs(), locally_relevant_dofs, *comm);
       }
     for (unsigned int i = 0; i < n_colors; ++i)
