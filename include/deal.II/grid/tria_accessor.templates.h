@@ -38,6 +38,89 @@ DEAL_II_ENABLE_EXTRA_DIAGNOSTICS
 DEAL_II_NAMESPACE_OPEN
 
 
+namespace internal
+{
+  namespace TriaAccessorImplementation
+  {
+    /**
+     * Compute the diameter for a given set of vertices. The vertices are
+     * interpreted, depending on their count, as the vertices of a particular
+     * reference cell.
+     */
+    template <int dim, int spacedim>
+    inline double
+    diameter(
+      const boost::container::small_vector<Point<spacedim>,
+                                           GeometryInfo<dim>::vertices_per_cell>
+        vertices)
+    {
+      const ReferenceCell::Type reference_cell_type =
+        ReferenceCell::n_vertices_to_type(dim, vertices.size());
+
+      if (reference_cell_type == ReferenceCell::Type::Line)
+        // Return the distance between the two vertices
+        return (vertices[1] - vertices[0]).norm();
+      else if (reference_cell_type == ReferenceCell::Type::Tri)
+        // Return the longest of the three edges
+        return std::max({(vertices[1] - vertices[0]).norm(),
+                         (vertices[2] - vertices[1]).norm(),
+                         (vertices[2] - vertices[0]).norm()});
+      else if (reference_cell_type == ReferenceCell::Type::Quad)
+        // Return the longer one of the two diagonals of the quadrilateral
+        return std::max({(vertices[3] - vertices[0]).norm(),
+                         (vertices[2] - vertices[1]).norm()});
+      else if (reference_cell_type == ReferenceCell::Type::Tet)
+        // Return the longest of the six edges of the tetrahedron
+        return std::max({(vertices[1] - vertices[0]).norm(),
+                         (vertices[2] - vertices[0]).norm(),
+                         (vertices[2] - vertices[1]).norm(),
+                         (vertices[3] - vertices[0]).norm(),
+                         (vertices[3] - vertices[1]).norm(),
+                         (vertices[3] - vertices[2]).norm()});
+      else if (reference_cell_type == ReferenceCell::Type::Pyramid)
+        // Return ...
+        return std::max({// the longest diagonal of the quadrilateral base
+                         // of the pyramid or ...
+                         (vertices[3] - vertices[0]).norm(),
+                         (vertices[2] - vertices[1]).norm(),
+                         // the longest edge connected with the apex of the
+                         // pyramid
+                         (vertices[4] - vertices[0]).norm(),
+                         (vertices[4] - vertices[1]).norm(),
+                         (vertices[4] - vertices[2]).norm(),
+                         (vertices[4] - vertices[3]).norm()});
+      else if (reference_cell_type == ReferenceCell::Type::Wedge)
+        // Return ...
+        return std::max({// the longest of the 2*3=6 diagonals of the three
+                         // quadrilateral sides of the wedge or ...
+                         (vertices[4] - vertices[0]).norm(),
+                         (vertices[3] - vertices[1]).norm(),
+                         (vertices[5] - vertices[1]).norm(),
+                         (vertices[4] - vertices[2]).norm(),
+                         (vertices[5] - vertices[0]).norm(),
+                         (vertices[3] - vertices[2]).norm(),
+                         // the longest of the 3*2=6 edges of the two
+                         // triangular faces of the wedge
+                         (vertices[1] - vertices[0]).norm(),
+                         (vertices[2] - vertices[1]).norm(),
+                         (vertices[2] - vertices[0]).norm(),
+                         (vertices[4] - vertices[3]).norm(),
+                         (vertices[5] - vertices[4]).norm(),
+                         (vertices[5] - vertices[3]).norm()});
+      else if (reference_cell_type == ReferenceCell::Type::Hex)
+        // Return the longest of the four diagonals of the hexahedron
+        return std::max({(vertices[7] - vertices[0]).norm(),
+                         (vertices[6] - vertices[1]).norm(),
+                         (vertices[2] - vertices[5]).norm(),
+                         (vertices[3] - vertices[4]).norm()});
+
+      Assert(false, ExcNotImplemented());
+      return -1e10;
+    }
+  } // namespace TriaAccessorImplementation
+} // namespace internal
+
+
 /*--------------------- Functions: TriaAccessorBase -------------------------*/
 
 template <int structdim, int dim, int spacedim>
@@ -584,7 +667,7 @@ namespace internal
                        const unsigned int)
       {
         /*
-         * Default implementation used in 1d and 2d
+         * Default implementation used in 1d
          *
          * In 1d, face_orientation is always true
          */
@@ -1870,8 +1953,8 @@ TriaAccessor<structdim, dim, spacedim>::set_all_manifold_ids(
         break;
 
       case 2:
-        // for quads also set manifold_id of bounding lines
-        for (unsigned int i = 0; i < 4; ++i)
+        // for quads/simplices also set manifold_id of bounding lines
+        for (unsigned int i = 0; i < this->n_lines(); ++i)
           this->line(i)->set_manifold_id(manifold_ind);
         break;
       default:
@@ -1885,34 +1968,27 @@ template <int structdim, int dim, int spacedim>
 double
 TriaAccessor<structdim, dim, spacedim>::diameter() const
 {
-  switch (this->reference_cell_type())
-    {
-      case ReferenceCell::Type::Line:
-        return (this->vertex(1) - this->vertex(0)).norm();
-      case ReferenceCell::Type::Tri:
-        return std::max(std::max((this->vertex(1) - this->vertex(0)).norm(),
-                                 (this->vertex(2) - this->vertex(1)).norm()),
-                        (this->vertex(2) - this->vertex(0)).norm());
-      case ReferenceCell::Type::Quad:
-        return std::max((this->vertex(3) - this->vertex(0)).norm(),
-                        (this->vertex(2) - this->vertex(1)).norm());
-      case ReferenceCell::Type::Tet:
-        return std::max(
-          std::max(std::max((this->vertex(1) - this->vertex(0)).norm(),
-                            (this->vertex(2) - this->vertex(0)).norm()),
-                   std::max((this->vertex(2) - this->vertex(1)).norm(),
-                            (this->vertex(3) - this->vertex(0)).norm())),
-          std::max((this->vertex(3) - this->vertex(1)).norm(),
-                   (this->vertex(3) - this->vertex(2)).norm()));
-      case ReferenceCell::Type::Hex:
-        return std::max(std::max((this->vertex(7) - this->vertex(0)).norm(),
-                                 (this->vertex(6) - this->vertex(1)).norm()),
-                        std::max((this->vertex(2) - this->vertex(5)).norm(),
-                                 (this->vertex(3) - this->vertex(4)).norm()));
-      default:
-        Assert(false, ExcNotImplemented());
-        return -1e10;
-    }
+  boost::container::small_vector<Point<spacedim>,
+                                 GeometryInfo<structdim>::vertices_per_cell>
+    vertices(this->n_vertices());
+
+  for (unsigned int v = 0; v < vertices.size(); ++v)
+    vertices[v] = this->vertex(v);
+
+  return internal::TriaAccessorImplementation::diameter<structdim, spacedim>(
+    vertices);
+}
+
+
+
+template <int dim, int spacedim>
+double
+CellAccessor<dim, spacedim>::diameter(
+  const Mapping<dim, spacedim> &mapping) const
+{
+  return internal::TriaAccessorImplementation::diameter<dim, spacedim>(
+    mapping.get_vertices(typename Triangulation<dim, spacedim>::cell_iterator(
+      this->tria, this->level(), this->index())));
 }
 
 

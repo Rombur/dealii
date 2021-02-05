@@ -1245,7 +1245,7 @@ namespace
     // this function catches all the cases not
     // explicitly handled above
     Assert(false, ExcNotImplemented());
-    return Point<spacedim>();
+    return {};
   }
 
 
@@ -1496,7 +1496,7 @@ TriaAccessor<structdim, dim, spacedim>::set_bounding_object_indices(
   const ArrayView<int> bounding_object_index_ref =
     this->objects().get_bounding_object_indices(this->present_index);
 
-  AssertDimension(bounding_object_index_ref.size(), new_indices.size());
+  AssertIndexRange(new_indices.size(), bounding_object_index_ref.size() + 1);
 
   unsigned int i = 0;
   for (const auto &new_index : new_indices)
@@ -1516,7 +1516,7 @@ TriaAccessor<structdim, dim, spacedim>::set_bounding_object_indices(
   const ArrayView<int> bounding_object_index_ref =
     this->objects().get_bounding_object_indices(this->present_index);
 
-  AssertDimension(bounding_object_index_ref.size(), new_indices.size());
+  AssertIndexRange(new_indices.size(), bounding_object_index_ref.size() + 1);
 
   unsigned int i = 0;
   for (const auto &new_index : new_indices)
@@ -1670,11 +1670,9 @@ TriaAccessor<3, 3, 3>::set_all_manifold_ids(
   // for hexes also set manifold_id
   // of bounding quads and lines
 
-  // Six bonding quads
-  for (unsigned int i = 0; i < 6; ++i)
+  for (unsigned int i : this->face_indices())
     this->quad(i)->set_manifold_id(manifold_ind);
-  // Twelve bounding lines
-  for (unsigned int i = 0; i < 12; ++i)
+  for (unsigned int i : this->line_indices())
     this->line(i)->set_manifold_id(manifold_ind);
 }
 
@@ -1859,8 +1857,9 @@ CellAccessor<3>::point_inside(const Point<3> &p) const
     {
       const TriaRawIterator<CellAccessor<dim, spacedim>> cell_iterator(*this);
       return (GeometryInfo<dim>::is_inside_unit_cell(
-        StaticMappingQ1<dim, spacedim>::mapping.transform_real_to_unit_cell(
-          cell_iterator, p)));
+        reference_cell_type()
+          .template get_default_linear_mapping<dim, spacedim>()
+          .transform_real_to_unit_cell(cell_iterator, p)));
     }
   catch (const Mapping<dim, spacedim>::ExcTransformationFailed &)
     {

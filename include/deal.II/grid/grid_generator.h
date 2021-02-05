@@ -1712,7 +1712,8 @@ namespace GridGenerator
    * existing triangulation. A prototypical case is a 2d domain with
    * rectangular holes. This can be achieved by first meshing the entire
    * domain and then using this function to get rid of the cells that are
-   * located at the holes. Likewise, you could create the mesh that
+   * located at the holes. A demonstration of this particular use case is part
+   * of step-27. Likewise, you could create the mesh that
    * GridGenerator::hyper_L() produces by starting with a
    * GridGenerator::hyper_cube(), refining it once, and then calling the
    * current function with a single cell in the second argument.
@@ -1906,6 +1907,48 @@ namespace GridGenerator
   void
   flatten_triangulation(const Triangulation<dim, spacedim1> &in_tria,
                         Triangulation<dim, spacedim2> &      out_tria);
+
+  /**
+   * Convert a triangulation consisting only of hypercube cells
+   * (quadrilaterals, hexahedra) to a triangulation only consisting of
+   * simplices (triangles, tetrahedra).
+   *
+   * As an example, the following image shows how a set of three hexahedra
+   * meshing one eighths of a sphere are subdivided into tetrahedra, and how
+   * the curved surface is taken into account. Colors indicate how boundary
+   * indicators are inherited:
+   * @image html "convert_hypercube_to_simplex_mesh_visualization_octant.png"
+   *
+   * In general, each quadrilateral in 2d is subdivided into eight triangles,
+   * and each hexahedron in 3d into 24 tetrahedra as shown here:
+   * @image html "convert_hypercube_to_simplex_mesh_visualization.png"
+   *
+   * Material ID and boundary IDs are inherited upon conversion.
+   *
+   * @param in_tria The triangulation containing hex elements.
+   * @param out_tria The converted triangulation containing tet elements.
+   *
+   * @note No manifold objects are copied by this function: you must
+   *   copy existing manifold objects from @p in_tria to @p out_tria, e.g.,
+   *   with the following code:
+   * @code
+   * for (const auto i : in_tria.get_manifold_ids())
+   *   if (i != numbers::flat_manifold_id)
+   *     out_tria.set_manifold(i, in_tria.get_manifold(i));
+   * @endcode
+   */
+  template <int dim, int spacedim>
+  void
+  convert_hypercube_to_simplex_mesh(const Triangulation<dim, spacedim> &in_tria,
+                                    Triangulation<dim, spacedim> &out_tria);
+
+  /**
+   * Specialization of the above function for 1D: simply copy triangulation.
+   */
+  template <int spacedim>
+  void
+  convert_hypercube_to_simplex_mesh(const Triangulation<1, spacedim> &in_tria,
+                                    Triangulation<1, spacedim> &      out_tria);
 
 
   /**

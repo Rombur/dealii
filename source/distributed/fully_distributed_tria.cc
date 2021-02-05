@@ -21,6 +21,7 @@
 
 #include <deal.II/grid/grid_tools.h>
 
+#include <fstream>
 #include <memory>
 
 DEAL_II_NAMESPACE_OPEN
@@ -206,6 +207,7 @@ namespace parallel
         }
 
       this->update_number_cache();
+      // this->update_cell_relations();
     }
 
 
@@ -217,10 +219,20 @@ namespace parallel
       const std::vector<dealii::CellData<dim>> &cells,
       const SubCellData &                       subcelldata)
     {
-      AssertThrow(
+      Assert(
         currently_processing_create_triangulation_for_internal_usage,
         ExcMessage(
-          "Use the other create_triangulation() function to create triangulations of type parallel::fullydistributed::Triangulation.!"));
+          "You have called the method parallel::fullydistributed::Triangulation::create_triangulation() \n"
+          "that takes 3 arguments. If you have not called this function directly, \n"
+          "it might have been called via a function from the GridGenerator or GridIn \n"
+          "namespace. To be able to setup a fully-distributed Triangulation with these \n"
+          "utility functions nevertheless, please follow the following three steps:\n"
+          "  1) call the utility function for a (serial) Triangulation, \n"
+          "     a parallel::shared::Triangulation, or a parallel::distributed::Triangulation object,\n"
+          "  2) use the functions TriangulationDescription::Utilities::create_description_from_triangulation() \n"
+          "     or ::create_description_from_triangulation_in_groups() to create the \n"
+          "     description of the local partition, and\n"
+          "  3) pass the created description to parallel::fullydistributed::Triangulation::create_triangulation()."));
 
       dealii::Triangulation<dim, spacedim>::create_triangulation(vertices,
                                                                  cells,
@@ -390,6 +402,35 @@ namespace parallel
       return coarse_cell_id;
     }
 
+
+    template <int dim, int spacedim>
+    void
+    Triangulation<dim, spacedim>::update_cell_relations()
+    {
+      AssertThrow(false, ExcNotImplemented());
+    }
+
+    template <int dim, int spacedim>
+    void
+    Triangulation<dim, spacedim>::save(const std::string &filename) const
+    {
+      (void)filename;
+
+      AssertThrow(false, ExcNotImplemented());
+    }
+
+
+
+    template <int dim, int spacedim>
+    void
+    Triangulation<dim, spacedim>::load(const std::string &filename,
+                                       const bool         autopartition)
+    {
+      (void)filename;
+      (void)autopartition;
+
+      AssertThrow(false, ExcNotImplemented());
+    }
 
 
   } // namespace fullydistributed

@@ -37,6 +37,7 @@
 #cmakedefine DEAL_II_WITH_64BIT_INDICES
 #cmakedefine DEAL_II_WITH_ADOLC
 #cmakedefine DEAL_II_WITH_ARPACK
+#cmakedefine DEAL_II_WITH_ARBORX
 #cmakedefine DEAL_II_WITH_ASSIMP
 #cmakedefine DEAL_II_WITH_COMPLEX_VALUES
 #cmakedefine DEAL_II_WITH_CUDA
@@ -150,6 +151,7 @@
 #cmakedefine DEAL_II_CXX14_CONSTEXPR_BUG
 
 #cmakedefine DEAL_II_DEPRECATED @DEAL_II_DEPRECATED@
+#cmakedefine DEAL_II_DEPRECATED_EARLY @DEAL_II_DEPRECATED_EARLY@
 #cmakedefine DEAL_II_FALLTHROUGH @DEAL_II_FALLTHROUGH@
 #cmakedefine DEAL_II_CONSTEXPR @DEAL_II_CONSTEXPR@
 
@@ -237,6 +239,13 @@
 #define DEAL_II_BOOST_VERSION_MAJOR @Boost_MAJOR_VERSION@
 #define DEAL_II_BOOST_VERSION_MINOR @Boost_MINOR_VERSION@
 #define DEAL_II_BOOST_VERSION_SUBMINOR @Boost_SUBMINOR_VERSION@
+
+#define DEAL_II_BOOST_VERSION_GTE(major,minor,subminor) \
+ ((DEAL_II_BOOST_VERSION_MAJOR * 100000 + \
+    DEAL_II_BOOST_VERSION_MINOR * 100 + \
+     DEAL_II_BOOST_VERSION_SUBMINOR) \
+    >= \
+    (major)*100000 + (minor)*100 + (subminor))
 
 /*
  * Gmsh:
@@ -392,7 +401,7 @@ _Pragma("GCC diagnostic ignored \"-Wextra\"")                     /*!*/ \
 _Pragma("GCC diagnostic ignored \"-Waddress-of-packed-member\"")        \
 _Pragma("GCC diagnostic ignored \"-Wdeprecated-copy\"")                 \
 _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")         \
-_Pragma("GCC diagnostic ignored \"-Wexpansion-to-defined\"")            \
+_Pragma("GCC diagnostic ignored \"-Wdeprecated-volatile\"")             \
 _Pragma("GCC diagnostic ignored \"-Wexpansion-to-defined\"")            \
 _Pragma("GCC diagnostic ignored \"-Wignored-attributes\"")              \
 _Pragma("GCC diagnostic ignored \"-Wignored-qualifiers\"")              \

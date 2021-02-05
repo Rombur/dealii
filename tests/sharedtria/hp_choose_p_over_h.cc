@@ -21,15 +21,16 @@
 
 #include <deal.II/distributed/shared_tria.h>
 
+#include <deal.II/dofs/dof_handler.h>
+
 #include <deal.II/fe/fe_q.h>
 
-#include <deal.II/grid/grid_generator.h>
-
-#include <deal.II/hp/dof_handler.h>
 #include <deal.II/hp/fe_collection.h>
 #include <deal.II/hp/refinement.h>
 
 #include "../tests.h"
+
+#include "../test_grids.h"
 
 
 template <int dim>
@@ -37,8 +38,6 @@ void
 test()
 {
   // setup
-  const unsigned int n_cells = 2;
-
   parallel::shared::Triangulation<dim> tr(
     MPI_COMM_WORLD,
     ::Triangulation<dim>::none,
@@ -51,23 +50,14 @@ test()
                              Utilities::MPI::n_mpi_processes(MPI_COMM_WORLD));
   });
 
-  std::vector<unsigned int> rep(dim, 1);
-  rep[0] = n_cells;
-  Point<dim> p1, p2;
-  for (unsigned int d = 0; d < dim; ++d)
-    {
-      p1[d] = 0;
-      p2[d] = (d == 0) ? n_cells : 1;
-    }
-  GridGenerator::subdivided_hyper_rectangle(tr, rep, p1, p2);
+  TestGrids::hyper_line(tr, 2);
   tr.refine_global(1);
 
   hp::FECollection<dim> fes;
   for (unsigned int d = 1; d <= 2; ++d)
     fes.push_back(FE_Q<dim>(d));
 
-  hp::DoFHandler<dim> dh(tr);
-  dh.set_fe(fes);
+  DoFHandler<dim> dh(tr);
 
   // set flags
   for (auto cell = dh.begin(0); cell != dh.end(0); ++cell)
@@ -103,6 +93,8 @@ test()
             }
         }
     }
+
+  dh.distribute_dofs(fes);
 
   // decide between p and h flags
   hp::Refinement::choose_p_over_h(dh);

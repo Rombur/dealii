@@ -127,7 +127,7 @@ namespace Particles
      * function is after particle transfer to a new process.
      */
     void
-    set_property_pool(PropertyPool &property_pool);
+    set_property_pool(PropertyPool<dim, spacedim> &property_pool);
 
     /**
      * Return whether this particle has a valid property pool and a valid
@@ -211,7 +211,8 @@ namespace Particles
       const Triangulation<dim, spacedim> &triangulation) const;
 
     /**
-     * Serialize the contents of this class.
+     * Serialize the contents of this class using the [BOOST serialization
+     * library](https://www.boost.org/doc/libs/1_74_0/libs/serialization/doc/index.html).
      */
     template <class Archive>
     void
@@ -384,7 +385,7 @@ namespace Particles
   template <int dim, int spacedim>
   inline void
   ParticleAccessor<dim, spacedim>::set_property_pool(
-    PropertyPool &new_property_pool)
+    PropertyPool<dim, spacedim> &new_property_pool)
   {
     Assert(particle != map->end(), ExcInternalError());
 

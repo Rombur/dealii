@@ -19,8 +19,7 @@
 #include <deal.II/base/config.h>
 
 #include <deal.II/base/array_view.h>
-
-#include <set>
+#include <deal.II/base/point.h>
 
 
 DEAL_II_NAMESPACE_OPEN
@@ -29,7 +28,10 @@ namespace Particles
 {
   /**
    * This class manages a memory space in which all particles associated with
-   * a ParticleHandler store their properties. The rationale for this class is
+   * a ParticleHandler store their properties. It also stores the locations
+   * and reference locations of particles.
+   *
+   * The rationale for this class is
    * that because typically every particle stores the same number of
    * properties, and because algorithms generally traverse over all particles
    * doing the same operation on all particles' properties, it is more efficient
@@ -46,6 +48,7 @@ namespace Particles
    * memory with varying sizes per particle (this memory would not be managed by
    * this class).
    */
+  template <int dim, int spacedim = dim>
   class PropertyPool
   {
   public:
@@ -54,7 +57,7 @@ namespace Particles
      * uniquely identifies the slot of memory that is reserved for this
      * particle.
      */
-    using Handle = double *;
+    using Handle = unsigned int;
 
     /**
      * Define a default (invalid) value for handles.
@@ -74,20 +77,55 @@ namespace Particles
     ~PropertyPool();
 
     /**
-     * Return a new handle that allows accessing the reserved block
-     * of memory. If the number of properties is zero this will return an
-     * invalid handle.
-     */
-    Handle
-    allocate_properties_array();
-
-    /**
-     * Mark the properties corresponding to the handle @p handle as
-     * deleted. Calling this function more than once for the same
-     * handle causes undefined behavior.
+     * Clear the dynamic memory allocated by this class. This function
+     * ensures that all memory that had previously been allocated using
+     * allocate_properties_array() has also been returned via
+     * deallocate_properties_array().
      */
     void
-    deallocate_properties_array(const Handle handle);
+    clear();
+
+    /**
+     * Return a new handle that allows a particle to store information such as
+     * properties and locations. This also allocated memory in this PropertyPool
+     * variable.
+     */
+    Handle
+    register_particle();
+
+    /**
+     * Return a handle obtained by register_particle() and mark the memory
+     * allocated for storing the particle's data as free for re-use.
+     */
+    void
+    deregister_particle(Handle &handle);
+
+    /**
+     * Return the location of a particle identified by the given `handle`.
+     */
+    const Point<spacedim> &
+    get_location(const Handle handle) const;
+
+    /**
+     * Set the location of a particle identified by the given `handle`.
+     */
+    void
+    set_location(const Handle handle, const Point<spacedim> &new_location);
+
+    /**
+     * Return the reference_location of a particle identified by the given
+     * `handle`.
+     */
+    const Point<dim> &
+    get_reference_location(const Handle handle) const;
+
+    /**
+     * Set the reference location of a particle identified by the given
+     * `handle`.
+     */
+    void
+    set_reference_location(const Handle      handle,
+                           const Point<dim> &new_reference_location);
 
     /**
      * Return an ArrayView to the properties that correspond to the given
@@ -116,12 +154,155 @@ namespace Particles
     const unsigned int n_properties;
 
     /**
-     * A collection of handles that have been created by
-     * allocate_properties_array() and have not been destroyed by
-     * deallocate_properties_array().
+     * A vector that stores the locations of particles. It is indexed in the
+     * same way as the `reference_locations` and `properties` arrays, i.e., via
+     * handles.
      */
-    std::set<Handle> currently_open_handles;
+    std::vector<Point<spacedim>> locations;
+
+    /**
+     * A vector that stores the reference locations of particles. It is indexed
+     * in the same way as the `locations` and `properties` arrays, i.e., via
+     * handles.
+     */
+    std::vector<Point<dim>> reference_locations;
+
+    /**
+     * The currently allocated properties (whether assigned to
+     * a particle or available for assignment). It is indexed the same way as
+     * the `locations` and `reference_locations` arrays via handles.
+     */
+    std::vector<double> properties;
+
+    /**
+     * A collection of handles that have been created by
+     * allocate_properties_array() and have been destroyed by
+     * deallocate_properties_array(). Since the memory is still
+     * allocated these handles can be reused for new particles
+     * to avoid memory allocation.
+     */
+    std::vector<Handle> currently_available_handles;
   };
+
+
+
+  /* ---------------------- inline and template functions ------------------ */
+
+  template <int dim, int spacedim>
+  inline const Point<spacedim> &
+  PropertyPool<dim, spacedim>::get_location(const Handle handle) const
+  {
+    const std::vector<double>::size_type data_index =
+      (handle != invalid_handle) ? handle : 0;
+
+    // Ideally we would need to assert that 'handle' has not been deallocated
+    // by searching through 'currently_available_handles'. However, this
+    // is expensive and this function is performance critical, so instead
+    // just check against the array range, and rely on the fact
+    // that handles are invalidated when handed over to
+    // deallocate_properties_array().
+    Assert(data_index <= locations.size() - 1,
+           ExcMessage("Invalid location handle. This can happen if the "
+                      "handle was duplicated and then one copy was deallocated "
+                      "before trying to access the properties."));
+
+    return locations[data_index];
+  }
+
+
+
+  template <int dim, int spacedim>
+  inline void
+  PropertyPool<dim, spacedim>::set_location(const Handle           handle,
+                                            const Point<spacedim> &new_location)
+  {
+    const std::vector<double>::size_type data_index =
+      (handle != invalid_handle) ? handle : 0;
+
+    // Ideally we would need to assert that 'handle' has not been deallocated
+    // by searching through 'currently_available_handles'. However, this
+    // is expensive and this function is performance critical, so instead
+    // just check against the array range, and rely on the fact
+    // that handles are invalidated when handed over to
+    // deallocate_properties_array().
+    Assert(data_index <= locations.size() - 1,
+           ExcMessage("Invalid location handle. This can happen if the "
+                      "handle was duplicated and then one copy was deallocated "
+                      "before trying to access the properties."));
+
+    locations[data_index] = new_location;
+  }
+
+
+
+  template <int dim, int spacedim>
+  inline const Point<dim> &
+  PropertyPool<dim, spacedim>::get_reference_location(const Handle handle) const
+  {
+    const std::vector<double>::size_type data_index =
+      (handle != invalid_handle) ? handle : 0;
+
+    // Ideally we would need to assert that 'handle' has not been deallocated
+    // by searching through 'currently_available_handles'. However, this
+    // is expensive and this function is performance critical, so instead
+    // just check against the array range, and rely on the fact
+    // that handles are invalidated when handed over to
+    // deallocate_properties_array().
+    Assert(data_index <= reference_locations.size() - 1,
+           ExcMessage("Invalid location handle. This can happen if the "
+                      "handle was duplicated and then one copy was deallocated "
+                      "before trying to access the properties."));
+
+    return reference_locations[data_index];
+  }
+
+
+
+  template <int dim, int spacedim>
+  inline void
+  PropertyPool<dim, spacedim>::set_reference_location(
+    const Handle      handle,
+    const Point<dim> &new_reference_location)
+  {
+    const std::vector<double>::size_type data_index =
+      (handle != invalid_handle) ? handle : 0;
+
+    // Ideally we would need to assert that 'handle' has not been deallocated
+    // by searching through 'currently_available_handles'. However, this
+    // is expensive and this function is performance critical, so instead
+    // just check against the array range, and rely on the fact
+    // that handles are invalidated when handed over to
+    // deallocate_properties_array().
+    Assert(data_index <= locations.size() - 1,
+           ExcMessage("Invalid location handle. This can happen if the "
+                      "handle was duplicated and then one copy was deallocated "
+                      "before trying to access the properties."));
+
+    reference_locations[data_index] = new_reference_location;
+  }
+
+
+
+  template <int dim, int spacedim>
+  inline ArrayView<double>
+  PropertyPool<dim, spacedim>::get_properties(const Handle handle)
+  {
+    const std::vector<double>::size_type data_index =
+      (handle != invalid_handle) ? handle * n_properties : 0;
+
+    // Ideally we would need to assert that 'handle' has not been deallocated
+    // by searching through 'currently_available_handles'. However, this
+    // is expensive and this function is performance critical, so instead
+    // just check against the array range, and rely on the fact
+    // that handles are invalidated when handed over to
+    // deallocate_properties_array().
+    Assert(data_index <= properties.size() - n_properties,
+           ExcMessage("Invalid property handle. This can happen if the "
+                      "handle was duplicated and then one copy was deallocated "
+                      "before trying to access the properties."));
+
+    return ArrayView<double>(properties.data() + data_index, n_properties);
+  }
 
 
 } // namespace Particles

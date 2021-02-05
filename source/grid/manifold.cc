@@ -40,7 +40,7 @@ Manifold<dim, spacedim>::project_to_manifold(
   const Point<spacedim> &) const
 {
   Assert(false, ExcPureFunctionCalled());
-  return Point<spacedim>();
+  return {};
 }
 
 
@@ -354,7 +354,7 @@ Manifold<dim, spacedim>::get_new_point_on_face(
         return get_new_point_on_quad(face);
     }
 
-  return Point<spacedim>();
+  return {};
 }
 
 
@@ -374,7 +374,7 @@ Manifold<dim, spacedim>::get_new_point_on_cell(
         return get_new_point_on_hex(cell);
     }
 
-  return Point<spacedim>();
+  return {};
 }
 
 
@@ -451,7 +451,7 @@ Manifold<dim, spacedim>::get_new_point_on_hex(
   const typename Triangulation<dim, spacedim>::hex_iterator & /*hex*/) const
 {
   Assert(false, ExcImpossibleInDim(dim));
-  return Point<spacedim>();
+  return {};
 }
 
 
@@ -892,8 +892,19 @@ FlatManifold<dim, spacedim>::normal_vector(
   const unsigned int facedim = dim - 1;
 
   Point<facedim> xi;
-  for (unsigned int i = 0; i < facedim; ++i)
-    xi[i] = 1. / 2;
+
+  const auto face_reference_cell_type = face->reference_cell_type();
+
+  if (face_reference_cell_type == ReferenceCell::Type::get_hypercube<facedim>())
+    {
+      for (unsigned int i = 0; i < facedim; ++i)
+        xi[i] = 1. / 2;
+    }
+  else
+    {
+      for (unsigned int i = 0; i < facedim; ++i)
+        xi[i] = 1. / 3;
+    }
 
   const double        eps = 1e-12;
   Tensor<1, spacedim> grad_F[facedim];
@@ -901,17 +912,18 @@ FlatManifold<dim, spacedim>::normal_vector(
   while (true)
     {
       Point<spacedim> F;
-      for (const unsigned int v : GeometryInfo<facedim>::vertex_indices())
+      for (const unsigned int v : face->vertex_indices())
         F += face->vertex(v) *
-             GeometryInfo<facedim>::d_linear_shape_function(xi, v);
+             face_reference_cell_type.d_linear_shape_function(xi, v);
 
       for (unsigned int i = 0; i < facedim; ++i)
         {
           grad_F[i] = 0;
-          for (const unsigned int v : GeometryInfo<facedim>::vertex_indices())
+          for (const unsigned int v : face->vertex_indices())
             grad_F[i] +=
               face->vertex(v) *
-              GeometryInfo<facedim>::d_linear_shape_function_gradient(xi, v)[i];
+              face_reference_cell_type.d_linear_shape_function_gradient(xi,
+                                                                        v)[i];
         }
 
       Tensor<1, facedim> J;

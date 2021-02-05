@@ -680,7 +680,7 @@ namespace Particles
      * Return a reference to the property pool that owns all particle
      * properties, and organizes them physically.
      */
-    PropertyPool &
+    PropertyPool<dim, spacedim> &
     get_property_pool() const;
 
     /**
@@ -737,7 +737,8 @@ namespace Particles
     register_load_callback_function(const bool serialization);
 
     /**
-     * Serialize the contents of this class.
+     * Serialize the contents of this class using the [BOOST serialization
+     * library](https://www.boost.org/doc/libs/1_74_0/libs/serialization/doc/index.html).
      */
     template <class Archive>
     void
@@ -805,7 +806,7 @@ namespace Particles
      * precedes the declaration of the `particles` and `ghost_particles`
      * members.
      */
-    std::unique_ptr<PropertyPool> property_pool;
+    std::unique_ptr<PropertyPool<dim, spacedim>> property_pool;
 
     /**
      * Set of particles currently living in the local domain, organized by
