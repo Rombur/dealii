@@ -22,8 +22,12 @@
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/dofs/dof_tools.h>
 
-#include <deal.II/simplex/fe_lib.h>
-#include <deal.II/simplex/grid_generator.h>
+#include <deal.II/fe/fe_pyramid_p.h>
+#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_simplex_p_bubbles.h>
+#include <deal.II/fe/fe_wedge_p.h>
+
+#include <deal.II/grid/grid_generator.h>
 
 #include "../tests.h"
 
@@ -41,8 +45,8 @@ test()
 
   GridGenerator::subdivided_hyper_cube_with_simplices(tr, 4);
 
-  const Simplex::FE_P<dim> fe(2);
-  DoFHandler<dim>          dofh(tr);
+  const FE_SimplexP<dim> fe(2);
+  DoFHandler<dim>        dofh(tr);
   dofh.distribute_dofs(fe);
 
   IndexSet relevant_set, boundary_dofs;

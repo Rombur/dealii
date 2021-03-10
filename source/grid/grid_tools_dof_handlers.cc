@@ -267,7 +267,7 @@ namespace GridTools
               // then we need to also add this neighbor
               if (dim >= 2)
                 for (const auto face :
-                     cell->reference_cell_type().faces_for_given_vertex(v))
+                     cell->reference_cell().faces_for_given_vertex(v))
                   if (!cell->at_boundary(face) &&
                       cell->neighbor(face)->is_active())
                     {
@@ -415,8 +415,7 @@ namespace GridTools
                                 const double                   tolerance)
   {
     return find_active_cell_around_point<dim, MeshType, spacedim>(
-             ReferenceCell::get_default_linear_mapping(
-               mesh.get_triangulation()),
+             get_default_linear_mapping(mesh.get_triangulation()),
              mesh,
              p,
              marked_vertices,

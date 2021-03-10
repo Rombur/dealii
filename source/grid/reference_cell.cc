@@ -14,313 +14,284 @@
 // ---------------------------------------------------------------------
 
 #include <deal.II/base/polynomial.h>
+#include <deal.II/base/polynomials_barycentric.h>
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/tensor_product_polynomials.h>
 
+#include <deal.II/fe/fe_pyramid_p.h>
+#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_simplex_p_bubbles.h>
+#include <deal.II/fe/fe_wedge_p.h>
 #include <deal.II/fe/mapping_fe.h>
 #include <deal.II/fe/mapping_q1.h>
+#include <deal.II/fe/mapping_q_generic.h>
 
 #include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/reference_cell.h>
 #include <deal.II/grid/tria.h>
 
-#include <deal.II/simplex/fe_lib.h>
-#include <deal.II/simplex/polynomials.h>
-#include <deal.II/simplex/quadrature_lib.h>
+#include <memory>
 
 DEAL_II_NAMESPACE_OPEN
 
 
-namespace ReferenceCell
+std::string
+ReferenceCell::to_string() const
 {
-  namespace internal
-  {
-    dealii::ReferenceCell::Type
-    make_reference_cell_from_int(const std::uint8_t kind)
+  if (*this == ReferenceCells::Vertex)
+    return "Vertex";
+  else if (*this == ReferenceCells::Line)
+    return "Line";
+  else if (*this == ReferenceCells::Triangle)
+    return "Tri";
+  else if (*this == ReferenceCells::Quadrilateral)
+    return "Quad";
+  else if (*this == ReferenceCells::Tetrahedron)
+    return "Tet";
+  else if (*this == ReferenceCells::Pyramid)
+    return "Pyramid";
+  else if (*this == ReferenceCells::Wedge)
+    return "Wedge";
+  else if (*this == ReferenceCells::Hexahedron)
+    return "Hex";
+  else if (*this == ReferenceCells::Invalid)
+    return "Invalid";
+
+  Assert(false, ExcNotImplemented());
+
+  return "Invalid";
+}
+
+
+
+template <int dim, int spacedim>
+std::unique_ptr<Mapping<dim, spacedim>>
+ReferenceCell::get_default_mapping(const unsigned int degree) const
+{
+  AssertDimension(dim, get_dimension());
+
+  if (is_hyper_cube())
+    return std::make_unique<MappingQGeneric<dim, spacedim>>(degree);
+  else if (is_simplex())
+    return std::make_unique<MappingFE<dim, spacedim>>(
+      FE_SimplexP<dim, spacedim>(degree));
+  else if (*this == ReferenceCells::Pyramid)
+    return std::make_unique<MappingFE<dim, spacedim>>(
+      FE_PyramidP<dim, spacedim>(degree));
+  else if (*this == ReferenceCells::Wedge)
+    return std::make_unique<MappingFE<dim, spacedim>>(
+      FE_WedgeP<dim, spacedim>(degree));
+  else
     {
-      // Make sure these are the only indices from which objects can be
-      // created.
-      Assert((kind == static_cast<std::uint8_t>(-1)) || (kind < 8),
-             ExcInternalError());
-
-      // Call the private constructor, which we can from here because this
-      // function is a 'friend'.
-      return {kind};
+      Assert(false, ExcNotImplemented());
     }
-  } // namespace internal
 
-
-  const Type Type::Vertex  = internal::make_reference_cell_from_int(0);
-  const Type Type::Line    = internal::make_reference_cell_from_int(1);
-  const Type Type::Tri     = internal::make_reference_cell_from_int(2);
-  const Type Type::Quad    = internal::make_reference_cell_from_int(3);
-  const Type Type::Tet     = internal::make_reference_cell_from_int(4);
-  const Type Type::Pyramid = internal::make_reference_cell_from_int(5);
-  const Type Type::Wedge   = internal::make_reference_cell_from_int(6);
-  const Type Type::Hex     = internal::make_reference_cell_from_int(7);
-  const Type Type::Invalid =
-    internal::make_reference_cell_from_int(static_cast<std::uint8_t>(-1));
+  return std::make_unique<MappingQGeneric<dim, spacedim>>(degree);
+}
 
 
 
-  std::string
-  Type::to_string() const
-  {
-    if (*this == Vertex)
-      return "Vertex";
-    else if (*this == Line)
-      return "Line";
-    else if (*this == Tri)
-      return "Tri";
-    else if (*this == Quad)
-      return "Quad";
-    else if (*this == Tet)
-      return "Tet";
-    else if (*this == Pyramid)
-      return "Pyramid";
-    else if (*this == Wedge)
-      return "Wedge";
-    else if (*this == Hex)
-      return "Hex";
-    else if (*this == Invalid)
-      return "Invalid";
+template <int dim, int spacedim>
+const Mapping<dim, spacedim> &
+ReferenceCell::get_default_linear_mapping() const
+{
+  AssertDimension(dim, get_dimension());
 
+  if (is_hyper_cube())
+    {
+      return StaticMappingQ1<dim, spacedim>::mapping;
+    }
+  else if (is_simplex())
+    {
+      static const MappingFE<dim, spacedim> mapping(
+        FE_SimplexP<dim, spacedim>(1));
+      return mapping;
+    }
+  else if (*this == ReferenceCells::Pyramid)
+    {
+      static const MappingFE<dim, spacedim> mapping(
+        FE_PyramidP<dim, spacedim>(1));
+      return mapping;
+    }
+  else if (*this == ReferenceCells::Wedge)
+    {
+      static const MappingFE<dim, spacedim> mapping(
+        FE_WedgeP<dim, spacedim>(1));
+      return mapping;
+    }
+  else
+    {
+      Assert(false, ExcNotImplemented());
+    }
+
+  return StaticMappingQ1<dim, spacedim>::mapping; // never reached
+}
+
+
+
+template <int dim>
+Quadrature<dim>
+ReferenceCell::get_gauss_type_quadrature(const unsigned n_points_1D) const
+{
+  AssertDimension(dim, get_dimension());
+
+  if (is_hyper_cube())
+    return QGauss<dim>(n_points_1D);
+  else if (is_simplex())
+    return QGaussSimplex<dim>(n_points_1D);
+  else if (*this == ReferenceCells::Pyramid)
+    return QGaussPyramid<dim>(n_points_1D);
+  else if (*this == ReferenceCells::Wedge)
+    return QGaussWedge<dim>(n_points_1D);
+  else
     Assert(false, ExcNotImplemented());
 
-    return "Invalid";
-  }
+  return Quadrature<dim>(); // never reached
+}
 
 
 
-  template <int dim, int spacedim>
-  void
-  Type::make_triangulation(Triangulation<dim, spacedim> &tria) const
-  {
-    if (this->is_hyper_cube())
-      {
-        GridGenerator::hyper_cube(tria, 0, 1);
-      }
-    else if ((dim == 2) && (*this == Tri))
-      {
-        const std::vector<Point<spacedim>> vertices = {
-          Point<spacedim>(),               // the origin
-          Point<spacedim>::unit_vector(0), // unit point along x-axis
-          Point<spacedim>::unit_vector(1)  // unit point along y-axis
-        };
+template <int dim>
+const Quadrature<dim> &
+ReferenceCell::get_nodal_type_quadrature() const
+{
+  AssertDimension(dim, get_dimension());
 
-        std::vector<CellData<dim>> cells(1);
-        cells[0].vertices = {0, 1, 2};
+  // A function that is used to fill a quadrature object of the
+  // desired type the first time we encounter a particular
+  // reference cell
+  const auto create_quadrature = [](const ReferenceCell &reference_cell) {
+    Triangulation<dim> tria;
+    GridGenerator::reference_cell(reference_cell, tria);
 
-        tria.create_triangulation(vertices, cells, {});
-      }
-    else if ((dim == 3) && (*this == Tet))
-      {
-        AssertDimension(spacedim, 3);
+    return Quadrature<dim>(tria.get_vertices());
+  };
 
-        static const std::vector<Point<spacedim>> vertices = {
-          {{0.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}}};
+  if (is_hyper_cube())
+    {
+      static const Quadrature<dim> quadrature = create_quadrature(*this);
+      return quadrature;
+    }
+  else if (is_simplex())
+    {
+      static const Quadrature<dim> quadrature = create_quadrature(*this);
+      return quadrature;
+    }
+  else if (*this == ReferenceCells::Pyramid)
+    {
+      static const Quadrature<dim> quadrature = create_quadrature(*this);
+      return quadrature;
+    }
+  else if (*this == ReferenceCells::Wedge)
+    {
+      static const Quadrature<dim> quadrature = create_quadrature(*this);
+      return quadrature;
+    }
+  else
+    Assert(false, ExcNotImplemented());
 
-        std::vector<CellData<dim>> cells(1);
-        cells[0].vertices = {0, 1, 2, 3};
-
-        tria.create_triangulation(vertices, cells, {});
-      }
-    else if ((dim == 3) && (*this == Pyramid))
-      {
-        AssertDimension(spacedim, 3);
-
-        static const std::vector<Point<spacedim>> vertices = {
-          {{-1.0, -1.0, 0.0},
-           {+1.0, -1.0, 0.0},
-           {-1.0, +1.0, 0.0},
-           {+1.0, +1.0, 0.0},
-           {+0.0, +0.0, 1.0}}};
-
-        std::vector<CellData<dim>> cells(1);
-        cells[0].vertices = {0, 1, 2, 3, 4};
-
-        tria.create_triangulation(vertices, cells, {});
-      }
-    else if ((dim == 3) && (*this == Wedge))
-      {
-        AssertDimension(spacedim, 3);
-
-        static const std::vector<Point<spacedim>> vertices = {
-          {{1.0, 0.0, 0.0},
-           {0.0, 1.0, 0.0},
-           {0.0, 0.0, 0.0},
-           {1.0, 0.0, 1.0},
-           {0.0, 1.0, 1.0},
-           {0.0, 0.0, 1.0}}};
-
-        std::vector<CellData<dim>> cells(1);
-        cells[0].vertices = {0, 1, 2, 3, 4, 5};
-
-        tria.create_triangulation(vertices, cells, {});
-      }
-    else
-      {
-        Assert(false, ExcNotImplemented());
-      }
-  }
+  static const Quadrature<dim> dummy;
+  return dummy; // never reached
+}
 
 
 
-  template <int dim, int spacedim>
-  std::unique_ptr<Mapping<dim, spacedim>>
-  Type::get_default_mapping(const unsigned int degree) const
-  {
-    AssertDimension(dim, get_dimension());
+unsigned int
+ReferenceCell::exodusii_vertex_to_deal_vertex(const unsigned int vertex_n) const
+{
+  AssertIndexRange(vertex_n, n_vertices());
 
-    if (*this == Type::get_hypercube<dim>())
-      return std::make_unique<MappingQGeneric<dim, spacedim>>(degree);
-    else if (*this == Type::Tri || *this == Type::Tet)
-      return std::make_unique<MappingFE<dim, spacedim>>(
-        Simplex::FE_P<dim, spacedim>(degree));
-    else if (*this == Type::Pyramid)
-      return std::make_unique<MappingFE<dim, spacedim>>(
-        Simplex::FE_PyramidP<dim, spacedim>(degree));
-    else if (*this == Type::Wedge)
-      return std::make_unique<MappingFE<dim, spacedim>>(
-        Simplex::FE_WedgeP<dim, spacedim>(degree));
-    else
-      {
-        Assert(false, ExcNotImplemented());
-      }
+  if (*this == ReferenceCells::Line)
+    {
+      return vertex_n;
+    }
+  else if (*this == ReferenceCells::Triangle)
+    {
+      return vertex_n;
+    }
+  else if (*this == ReferenceCells::Quadrilateral)
+    {
+      constexpr std::array<unsigned int, 4> exodus_to_deal{{0, 1, 3, 2}};
+      return exodus_to_deal[vertex_n];
+    }
+  else if (*this == ReferenceCells::Tetrahedron)
+    {
+      return vertex_n;
+    }
+  else if (*this == ReferenceCells::Hexahedron)
+    {
+      constexpr std::array<unsigned int, 8> exodus_to_deal{
+        {0, 1, 3, 2, 4, 5, 7, 6}};
+      return exodus_to_deal[vertex_n];
+    }
+  else if (*this == ReferenceCells::Wedge)
+    {
+      constexpr std::array<unsigned int, 6> exodus_to_deal{{2, 1, 0, 5, 4, 3}};
+      return exodus_to_deal[vertex_n];
+    }
+  else if (*this == ReferenceCells::Pyramid)
+    {
+      constexpr std::array<unsigned int, 5> exodus_to_deal{{0, 1, 3, 2, 4}};
+      return exodus_to_deal[vertex_n];
+    }
 
-    return std::make_unique<MappingQGeneric<dim, spacedim>>(degree);
-  }
+  Assert(false, ExcNotImplemented());
 
-
-
-  template <int dim, int spacedim>
-  const Mapping<dim, spacedim> &
-  Type::get_default_linear_mapping() const
-  {
-    AssertDimension(dim, get_dimension());
-
-    if (*this == Type::get_hypercube<dim>())
-      {
-        return StaticMappingQ1<dim, spacedim>::mapping;
-      }
-    else if (*this == Type::Tri || *this == Type::Tet)
-      {
-        static const MappingFE<dim, spacedim> mapping(
-          Simplex::FE_P<dim, spacedim>(1));
-        return mapping;
-      }
-    else if (*this == Type::Pyramid)
-      {
-        static const MappingFE<dim, spacedim> mapping(
-          Simplex::FE_PyramidP<dim, spacedim>(1));
-        return mapping;
-      }
-    else if (*this == Type::Wedge)
-      {
-        static const MappingFE<dim, spacedim> mapping(
-          Simplex::FE_WedgeP<dim, spacedim>(1));
-        return mapping;
-      }
-    else
-      {
-        Assert(false, ExcNotImplemented());
-      }
-
-    return StaticMappingQ1<dim, spacedim>::mapping; // never reached
-  }
+  return numbers::invalid_unsigned_int;
+}
 
 
 
-  template <int dim, int spacedim>
-  const Mapping<dim, spacedim> &
-  get_default_linear_mapping(const Triangulation<dim, spacedim> &triangulation)
-  {
-    const auto &reference_cell_types = triangulation.get_reference_cell_types();
-    Assert(reference_cell_types.size() == 1,
-           ExcMessage(
-             "This function can only work for triangulations that "
-             "use only a single cell type -- for example, only triangles "
-             "or only quadrilaterals. For mixed meshes, there is no "
-             "single linear mapping object that can be used for all "
-             "cells of the triangulation. The triangulation you are "
-             "passing to this function uses multiple cell types."));
+unsigned int
+ReferenceCell::exodusii_face_to_deal_face(const unsigned int face_n) const
+{
+  AssertIndexRange(face_n, n_faces());
 
-    return reference_cell_types.front()
-      .template get_default_linear_mapping<dim, spacedim>();
-  }
+  if (*this == ReferenceCells::Vertex)
+    {
+      return 0;
+    }
+  if (*this == ReferenceCells::Line)
+    {
+      return face_n;
+    }
+  else if (*this == ReferenceCells::Triangle)
+    {
+      return face_n;
+    }
+  else if (*this == ReferenceCells::Quadrilateral)
+    {
+      constexpr std::array<unsigned int, 4> exodus_to_deal{{2, 1, 3, 0}};
+      return exodus_to_deal[face_n];
+    }
+  else if (*this == ReferenceCells::Tetrahedron)
+    {
+      constexpr std::array<unsigned int, 4> exodus_to_deal{{1, 3, 2, 0}};
+      return exodus_to_deal[face_n];
+    }
+  else if (*this == ReferenceCells::Hexahedron)
+    {
+      constexpr std::array<unsigned int, 6> exodus_to_deal{{2, 1, 3, 0, 4, 5}};
+      return exodus_to_deal[face_n];
+    }
+  else if (*this == ReferenceCells::Wedge)
+    {
+      constexpr std::array<unsigned int, 6> exodus_to_deal{{3, 4, 2, 0, 1}};
+      return exodus_to_deal[face_n];
+    }
+  else if (*this == ReferenceCells::Pyramid)
+    {
+      constexpr std::array<unsigned int, 5> exodus_to_deal{{3, 2, 4, 1, 0}};
+      return exodus_to_deal[face_n];
+    }
+
+  Assert(false, ExcNotImplemented());
+
+  return numbers::invalid_unsigned_int;
+}
 
 
-
-  template <int dim>
-  Quadrature<dim>
-  get_gauss_type_quadrature(const Type &   reference_cell,
-                            const unsigned n_points_1D)
-  {
-    AssertDimension(dim, reference_cell.get_dimension());
-
-    if (reference_cell == Type::get_hypercube<dim>())
-      return QGauss<dim>(n_points_1D);
-    else if (reference_cell == Type::Tri || reference_cell == Type::Tet)
-      return Simplex::QGauss<dim>(n_points_1D);
-    else if (reference_cell == Type::Pyramid)
-      return Simplex::QGaussPyramid<dim>(n_points_1D);
-    else if (reference_cell == Type::Wedge)
-      return Simplex::QGaussWedge<dim>(n_points_1D);
-    else
-      Assert(false, ExcNotImplemented());
-
-    return Quadrature<dim>(); // never reached
-  }
-
-
-
-  template <int dim>
-  const Quadrature<dim> &
-  get_nodal_type_quadrature(const Type &reference_cell)
-  {
-    AssertDimension(dim, reference_cell.get_dimension());
-
-    const auto create_quadrature = [](const Type &reference_cell) {
-      Triangulation<dim> tria;
-      reference_cell.make_triangulation(tria);
-
-      return Quadrature<dim>(tria.get_vertices());
-    };
-
-    if (reference_cell == Type::get_hypercube<dim>())
-      {
-        static const Quadrature<dim> quadrature =
-          create_quadrature(reference_cell);
-        return quadrature;
-      }
-    else if (reference_cell == Type::Tri || reference_cell == Type::Tet)
-      {
-        static const Quadrature<dim> quadrature =
-          create_quadrature(reference_cell);
-        return quadrature;
-      }
-    else if (reference_cell == Type::Pyramid)
-      {
-        static const Quadrature<dim> quadrature =
-          create_quadrature(reference_cell);
-        return quadrature;
-      }
-    else if (reference_cell == Type::Wedge)
-      {
-        static const Quadrature<dim> quadrature =
-          create_quadrature(reference_cell);
-        return quadrature;
-      }
-    else
-      Assert(false, ExcNotImplemented());
-
-    static Quadrature<dim> dummy;
-
-    return dummy; // never reached
-  }
 
 #include "reference_cell.inst"
-
-} // namespace ReferenceCell
 
 DEAL_II_NAMESPACE_CLOSE

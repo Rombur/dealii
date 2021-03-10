@@ -21,17 +21,23 @@
 #include <deal.II/sundials/n_vector.h>
 
 #ifdef DEAL_II_WITH_SUNDIALS
-#  if DEAL_II_SUNDIALS_VERSION_GTE(5, 0, 0)
 
-#    include <deal.II/base/exceptions.h>
+#  include <deal.II/base/exceptions.h>
 
-#    include <deal.II/lac/block_vector.h>
-#    include <deal.II/lac/la_parallel_block_vector.h>
-#    include <deal.II/lac/la_parallel_vector.h>
-#    include <deal.II/lac/la_vector.h>
-#    include <deal.II/lac/trilinos_parallel_block_vector.h>
-#    include <deal.II/lac/trilinos_vector.h>
-#    include <deal.II/lac/vector_memory.h>
+#  include <deal.II/lac/block_vector.h>
+#  include <deal.II/lac/la_parallel_block_vector.h>
+#  include <deal.II/lac/la_parallel_vector.h>
+#  include <deal.II/lac/la_vector.h>
+#  include <deal.II/lac/petsc_block_vector.h>
+#  include <deal.II/lac/petsc_vector.h>
+#  include <deal.II/lac/trilinos_parallel_block_vector.h>
+#  include <deal.II/lac/trilinos_vector.h>
+#  include <deal.II/lac/vector_memory.h>
+
+#  if DEAL_II_SUNDIALS_VERSION_LT(5, 0, 0)
+#    include <deal.II/sundials/sundials_backport.h>
+#  endif
+
 DEAL_II_NAMESPACE_OPEN
 
 namespace SUNDIALS
@@ -210,6 +216,28 @@ namespace SUNDIALS
       realtype
       max_norm(N_Vector x);
 
+      template <
+        typename VectorType,
+        typename std::enable_if_t<is_serial_vector<VectorType>::value, int> = 0>
+      realtype
+      min_element(N_Vector x);
+
+      template <
+        typename VectorType,
+        typename std::enable_if_t<!is_serial_vector<VectorType>::value &&
+                                    !IsBlockVector<VectorType>::value,
+                                  int> = 0>
+      realtype
+      min_element(N_Vector x);
+
+      template <
+        typename VectorType,
+        typename std::enable_if_t<!is_serial_vector<VectorType>::value &&
+                                    IsBlockVector<VectorType>::value,
+                                  int> = 0>
+      realtype
+      min_element(N_Vector x);
+
       template <typename VectorType>
       void
       scale(realtype c, N_Vector x, N_Vector z);
@@ -224,24 +252,32 @@ namespace SUNDIALS
 
       template <
         typename VectorType,
+        typename std::enable_if_t<!IsBlockVector<VectorType>::value, int> = 0>
+      MPI_Comm
+      get_communicator(N_Vector v);
+
+      template <
+        typename VectorType,
+        typename std::enable_if_t<IsBlockVector<VectorType>::value, int> = 0>
+      MPI_Comm
+      get_communicator(N_Vector v);
+
+      /**
+       * Sundials likes a void* but we want to use the above functions
+       * internally with a safe type.
+       */
+      template <
+        typename VectorType,
         typename std::enable_if_t<is_serial_vector<VectorType>::value, int> = 0>
-      void *get_communicator(N_Vector);
+      inline void *
+      get_communicator_as_void_ptr(N_Vector v);
 
-      template <
-        typename VectorType,
-        typename std::enable_if_t<!is_serial_vector<VectorType>::value &&
-                                    !IsBlockVector<VectorType>::value,
-                                  int> = 0>
-      void *
-      get_communicator(N_Vector v);
+      template <typename VectorType,
+                typename std::enable_if_t<!is_serial_vector<VectorType>::value,
+                                          int> = 0>
+      inline void *
+      get_communicator_as_void_ptr(N_Vector v);
 
-      template <
-        typename VectorType,
-        typename std::enable_if_t<!is_serial_vector<VectorType>::value &&
-                                    IsBlockVector<VectorType>::value,
-                                  int> = 0>
-      void *
-      get_communicator(N_Vector v);
     } // namespace NVectorOperations
   }   // namespace internal
 } // namespace SUNDIALS
@@ -348,6 +384,7 @@ SUNDIALS::internal::NVectorView<VectorType>::NVectorView(VectorType &vector)
 template <typename VectorType>
 SUNDIALS::internal::NVectorView<VectorType>::operator N_Vector() const
 {
+  Assert(vector_ptr != nullptr, ExcNotInitialized());
   return vector_ptr.get();
 }
 
@@ -356,6 +393,7 @@ SUNDIALS::internal::NVectorView<VectorType>::operator N_Vector() const
 template <typename VectorType>
 N_Vector SUNDIALS::internal::NVectorView<VectorType>::operator->() const
 {
+  Assert(vector_ptr != nullptr, ExcNotInitialized());
   return vector_ptr.get();
 }
 
@@ -436,31 +474,14 @@ SUNDIALS::internal::NVectorOperations::destroy(N_Vector v)
       v->content = nullptr;
     }
 
-  /* free ops and vector */
-  if (v->ops != nullptr)
-    {
-      free(v->ops);
-      v->ops = nullptr;
-    }
-  free(v);
+  N_VFreeEmpty(v);
 }
 
 
 
 template <typename VectorType,
-          std::enable_if_t<is_serial_vector<VectorType>::value, int>>
-void *SUNDIALS::internal::NVectorOperations::get_communicator(N_Vector)
-{
-  return nullptr;
-}
-
-
-
-template <typename VectorType,
-          std::enable_if_t<!is_serial_vector<VectorType>::value &&
-                             IsBlockVector<VectorType>::value,
-                           int>>
-void *
+          std::enable_if_t<IsBlockVector<VectorType>::value, int>>
+MPI_Comm
 SUNDIALS::internal::NVectorOperations::get_communicator(N_Vector v)
 {
   return unwrap_nvector_const<VectorType>(v)->block(0).get_mpi_communicator();
@@ -469,13 +490,37 @@ SUNDIALS::internal::NVectorOperations::get_communicator(N_Vector v)
 
 
 template <typename VectorType,
-          std::enable_if_t<!is_serial_vector<VectorType>::value &&
-                             !IsBlockVector<VectorType>::value,
-                           int>>
-void *
+          std::enable_if_t<!IsBlockVector<VectorType>::value, int>>
+MPI_Comm
 SUNDIALS::internal::NVectorOperations::get_communicator(N_Vector v)
 {
   return unwrap_nvector_const<VectorType>(v)->get_mpi_communicator();
+}
+
+
+
+template <typename VectorType,
+          typename std::enable_if_t<is_serial_vector<VectorType>::value, int>>
+void *
+  SUNDIALS::internal::NVectorOperations::get_communicator_as_void_ptr(N_Vector)
+{
+  // required by SUNDIALS: MPI-unaware vectors should return the nullptr as comm
+  return nullptr;
+}
+
+
+
+template <typename VectorType,
+          typename std::enable_if_t<!is_serial_vector<VectorType>::value, int>>
+void *
+SUNDIALS::internal::NVectorOperations::get_communicator_as_void_ptr(N_Vector v)
+{
+#  ifndef DEAL_II_WITH_MPI
+  (void)v;
+  return nullptr;
+#  else
+  return get_communicator<VectorType>(v);
+#  endif
 }
 
 
@@ -599,6 +644,81 @@ SUNDIALS::internal::NVectorOperations::max_norm(N_Vector x)
 
 
 
+template <typename VectorType,
+          typename std::enable_if_t<is_serial_vector<VectorType>::value, int>>
+realtype
+SUNDIALS::internal::NVectorOperations::min_element(N_Vector x)
+{
+  auto *vector = unwrap_nvector_const<VectorType>(x);
+  return *std::min_element(vector->begin(), vector->end());
+}
+
+
+
+template <typename VectorType,
+          typename std::enable_if_t<!is_serial_vector<VectorType>::value &&
+                                      !IsBlockVector<VectorType>::value,
+                                    int>>
+realtype
+SUNDIALS::internal::NVectorOperations::min_element(N_Vector x)
+{
+  auto *vector = unwrap_nvector_const<VectorType>(x);
+
+
+  const auto indexed_less_than = [&](const IndexSet::size_type idxa,
+                                     const IndexSet::size_type idxb) {
+    return (*vector)[idxa] < (*vector)[idxb];
+  };
+
+  auto local_elements = vector->locally_owned_elements();
+
+  const auto local_min = *std::min_element(local_elements.begin(),
+                                           local_elements.end(),
+                                           indexed_less_than);
+  return Utilities::MPI::min((*vector)[local_min],
+                             get_communicator<VectorType>(x));
+}
+
+
+
+template <typename VectorType,
+          typename std::enable_if_t<!is_serial_vector<VectorType>::value &&
+                                      IsBlockVector<VectorType>::value,
+                                    int>>
+realtype
+SUNDIALS::internal::NVectorOperations::min_element(N_Vector x)
+{
+  auto *vector = unwrap_nvector_const<VectorType>(x);
+
+  // initialize local minimum to the largest possible value
+  auto proc_local_min =
+    std::numeric_limits<typename VectorType::value_type>::max();
+
+  for (unsigned i = 0; i < vector->n_blocks(); ++i)
+    {
+      const auto indexed_less_than = [&](const IndexSet::size_type idxa,
+                                         const IndexSet::size_type idxb) {
+        return vector->block(i)[idxa] < vector->block(i)[idxb];
+      };
+
+      auto local_elements = vector->block(i).locally_owned_elements();
+
+      const auto block_local_min_element =
+        std::min_element(local_elements.begin(),
+                         local_elements.end(),
+                         indexed_less_than);
+
+      // guard against empty blocks on this processor
+      if (block_local_min_element != local_elements.end())
+        proc_local_min =
+          std::min(proc_local_min, vector->block(i)[*block_local_min_element]);
+    }
+
+  return Utilities::MPI::min(proc_local_min, get_communicator<VectorType>(x));
+}
+
+
+
 template <typename VectorType>
 void
 SUNDIALS::internal::NVectorOperations::scale(realtype c, N_Vector x, N_Vector z)
@@ -628,11 +748,12 @@ SUNDIALS::internal::NVectorOperations::elementwise_div(N_Vector x,
   AssertDimension(x_dealii->size(), z_dealii->size());
   AssertDimension(x_dealii->size(), y_dealii->size());
 
-  std::transform(x_dealii->begin(),
-                 x_dealii->end(),
-                 y_dealii->begin(),
-                 z_dealii->begin(),
-                 std::divides<>{});
+  auto x_ele = x_dealii->locally_owned_elements();
+  for (const auto idx : x_ele)
+    {
+      (*z_dealii)[idx] = (*x_dealii)[idx] / (*y_dealii)[idx];
+    }
+  z_dealii->compress(VectorOperation::insert);
 }
 
 
@@ -654,11 +775,15 @@ SUNDIALS::internal::NVectorOperations::elementwise_div(N_Vector x,
   AssertDimension(x_dealii->n_blocks(), y_dealii->n_blocks());
 
   for (unsigned i = 0; i < x_dealii->n_blocks(); ++i)
-    std::transform(x_dealii->block(i).begin(),
-                   x_dealii->block(i).end(),
-                   y_dealii->block(i).begin(),
-                   z_dealii->block(i).begin(),
-                   std::divides<>{});
+    {
+      auto x_ele = x_dealii->block(i).locally_owned_elements();
+      for (const auto idx : x_ele)
+        {
+          z_dealii->block(i)[idx] =
+            x_dealii->block(i)[idx] / y_dealii->block(i)[idx];
+        }
+    }
+  z_dealii->compress(VectorOperation::insert);
 }
 
 
@@ -673,10 +798,12 @@ SUNDIALS::internal::NVectorOperations::elementwise_inv(N_Vector x, N_Vector z)
 
   AssertDimension(x_dealii->size(), z_dealii->size());
 
-  std::transform(x_dealii->begin(),
-                 x_dealii->end(),
-                 z_dealii->begin(),
-                 [](typename VectorType::value_type v) { return 1.0 / v; });
+  auto x_ele = x_dealii->locally_owned_elements();
+  for (const auto idx : x_ele)
+    {
+      (*z_dealii)[idx] = 1.0 / (*x_dealii)[idx];
+    }
+  z_dealii->compress(VectorOperation::insert);
 }
 
 
@@ -693,10 +820,15 @@ SUNDIALS::internal::NVectorOperations::elementwise_inv(N_Vector x, N_Vector z)
   AssertDimension(x_dealii->n_blocks(), z_dealii->n_blocks());
 
   for (unsigned i = 0; i < x_dealii->n_blocks(); ++i)
-    std::transform(x_dealii->block(i).begin(),
-                   x_dealii->block(i).end(),
-                   z_dealii->block(i).begin(),
-                   [](typename VectorType::value_type v) { return 1.0 / v; });
+    {
+      auto x_ele = x_dealii->block(i).locally_owned_elements();
+      for (const auto idx : x_ele)
+        {
+          z_dealii->block(i)[idx] = 1.0 / x_dealii->block(i)[idx];
+        }
+    }
+
+  z_dealii->compress(VectorOperation::insert);
 }
 
 
@@ -711,12 +843,13 @@ SUNDIALS::internal::NVectorOperations::elementwise_abs(N_Vector x, N_Vector z)
 
   AssertDimension(x_dealii->size(), z_dealii->size());
 
-  std::transform(x_dealii->begin(),
-                 x_dealii->end(),
-                 z_dealii->begin(),
-                 [](typename VectorType::value_type v) {
-                   return std::fabs(v);
-                 });
+  auto x_ele = x_dealii->locally_owned_elements();
+  for (const auto idx : x_ele)
+    {
+      (*z_dealii)[idx] = std::fabs((*x_dealii)[idx]);
+    }
+
+  z_dealii->compress(VectorOperation::insert);
 }
 
 
@@ -733,12 +866,15 @@ SUNDIALS::internal::NVectorOperations::elementwise_abs(N_Vector x, N_Vector z)
   AssertDimension(x_dealii->n_blocks(), z_dealii->n_blocks());
 
   for (unsigned i = 0; i < x_dealii->n_blocks(); ++i)
-    std::transform(x_dealii->block(i).begin(),
-                   x_dealii->block(i).end(),
-                   z_dealii->block(i).begin(),
-                   [](typename VectorType::value_type v) {
-                     return std::fabs(v);
-                   });
+    {
+      auto x_ele = x_dealii->block(i).locally_owned_elements();
+      for (const auto idx : x_ele)
+        {
+          z_dealii->block(i)[idx] = std::fabs(x_dealii->block(i)[idx]);
+        }
+    }
+
+  z_dealii->compress(VectorOperation::insert);
 }
 
 
@@ -756,8 +892,11 @@ SUNDIALS::internal::create_empty_nvector()
   v->ops->nvcloneempty  = NVectorOperations::clone_empty;
   v->ops->nvdestroy     = NVectorOperations::destroy<VectorType>;
   //  v->ops->nvspace           = undef;
-  v->ops->nvgetcommunicator = NVectorOperations::get_communicator<VectorType>;
-  v->ops->nvgetlength       = NVectorOperations::get_global_length<VectorType>;
+#  if DEAL_II_SUNDIALS_VERSION_GTE(5, 0, 0)
+  v->ops->nvgetcommunicator =
+    NVectorOperations::get_communicator_as_void_ptr<VectorType>;
+  v->ops->nvgetlength = NVectorOperations::get_global_length<VectorType>;
+#  endif
 
   /* standard vector operations */
   v->ops->nvlinearsum = NVectorOperations::linear_sum<VectorType>;
@@ -772,7 +911,7 @@ SUNDIALS::internal::create_empty_nvector()
   v->ops->nvmaxnorm   = NVectorOperations::max_norm<VectorType>;
   v->ops->nvwrmsnorm  = NVectorOperations::weighted_rms_norm<VectorType>;
   //  v->ops->nvwrmsnormmask = undef;
-  //  v->ops->nvmin          = undef;
+  v->ops->nvmin = NVectorOperations::min_element<VectorType>;
   //  v->ops->nvwl2norm      = undef;
   //  v->ops->nvl1norm       = undef;
   //  v->ops->nvcompare      = undef;
@@ -797,6 +936,5 @@ SUNDIALS::internal::create_empty_nvector()
 
 DEAL_II_NAMESPACE_CLOSE
 
-#  endif
 #endif
 #endif

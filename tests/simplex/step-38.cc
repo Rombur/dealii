@@ -46,9 +46,14 @@
 #include <deal.II/numerics/vector_tools.h>
 
 // simplex
-#include <deal.II/simplex/fe_lib.h>
-#include <deal.II/simplex/grid_generator.h>
-#include <deal.II/simplex/quadrature_lib.h>
+#include <deal.II/base/quadrature_lib.h>
+
+#include <deal.II/fe/fe_pyramid_p.h>
+#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_simplex_p_bubbles.h>
+#include <deal.II/fe/fe_wedge_p.h>
+
+#include <deal.II/grid/grid_generator.h>
 
 #include <fstream>
 #include <iostream>
@@ -85,8 +90,8 @@ namespace Step38
     DoFHandler<dim, spacedim>    dof_handler;
 
 #ifdef USE_SIMPLEX
-    Simplex::FE_P<dim, spacedim> fe;
-    MappingFE<dim, spacedim>     mapping;
+    FE_SimplexP<dim, spacedim> fe;
+    MappingFE<dim, spacedim>   mapping;
 #else
     FE_Q<dim, spacedim>     fe;
     MappingQ<dim, spacedim> mapping;
@@ -209,7 +214,7 @@ namespace Step38
     , fe(degree)
 #ifdef USE_SIMPLEX
     // Quadratic mapping for simplex is still not implemented.
-    , mapping(Simplex::FE_P<dim, spacedim>(degree))
+    , mapping(FE_SimplexP<dim, spacedim>(degree))
 #else
     , mapping(degree)
 #endif
@@ -274,7 +279,7 @@ namespace Step38
     system_matrix = 0;
     system_rhs    = 0;
 #ifdef USE_SIMPLEX
-    const Simplex::QGauss<dim> quadrature_formula(fe.degree + 1);
+    const QGaussSimplex<dim> quadrature_formula(fe.degree + 1);
 #else
     const QGauss<dim> quadrature_formula(2 * fe.degree);
 #endif
@@ -379,7 +384,7 @@ namespace Step38
                                       Solution<spacedim>(),
                                       difference_per_cell,
 #ifdef USE_SIMPLEX
-                                      Simplex::QGauss<dim>(fe.degree + 1),
+                                      QGaussSimplex<dim>(fe.degree + 1),
 #else
                                       QGauss<dim>(2 * fe.degree +
                                                   1), // This also works on

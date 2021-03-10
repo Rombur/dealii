@@ -51,7 +51,7 @@ main(int argc, char **argv)
 {
   initlog();
 
-  typedef Vector<double> VectorType;
+  using VectorType = Vector<double>;
 
   ParameterHandler                             prm;
   SUNDIALS::ARKode<VectorType>::AdditionalData data;
@@ -68,8 +68,6 @@ main(int argc, char **argv)
   prm.parse_input(ifile);
 
   SUNDIALS::ARKode<VectorType> ode(data);
-
-  ode.reinit_vector = [&](VectorType &v) { v.reinit(2); };
 
   // Explicit jacobian = stiffness matrix
   FullMatrix<double> K(2, 2);

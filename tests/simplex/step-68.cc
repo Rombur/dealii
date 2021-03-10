@@ -30,6 +30,7 @@
 #include <deal.II/base/discrete_time.h>
 #include <deal.II/base/mpi.h>
 #include <deal.II/base/parameter_acceptor.h>
+#include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/timer.h>
 
 #include <deal.II/distributed/cell_weights.h>
@@ -40,8 +41,12 @@
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/dofs/dof_tools.h>
 
+#include <deal.II/fe/fe_pyramid_p.h>
 #include <deal.II/fe/fe_q.h>
+#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_simplex_p_bubbles.h>
 #include <deal.II/fe/fe_system.h>
+#include <deal.II/fe/fe_wedge_p.h>
 #include <deal.II/fe/mapping_fe.h>
 
 #include <deal.II/grid/grid_generator.h>
@@ -58,10 +63,6 @@
 #include <deal.II/particles/data_out.h>
 #include <deal.II/particles/generators.h>
 #include <deal.II/particles/particle_handler.h>
-
-#include <deal.II/simplex/fe_lib.h>
-#include <deal.II/simplex/grid_generator.h>
-#include <deal.II/simplex/quadrature_lib.h>
 
 #include <cmath>
 #include <iostream>
@@ -170,8 +171,8 @@ namespace Step68
     : mpi_communicator(MPI_COMM_WORLD)
     , background_triangulation(mpi_communicator)
     , fluid_dh(background_triangulation)
-    , fluid_fe(Simplex::FE_P<dim>(velocity_degree), dim)
-    , mapping(Simplex::FE_P<dim>(velocity_degree))
+    , fluid_fe(FE_SimplexP<dim>(velocity_degree), dim)
+    , mapping(FE_SimplexP<dim>(velocity_degree))
   {}
 
   // @sect4{Particles generation}
@@ -271,7 +272,7 @@ namespace Step68
     // We generate the particles at the position of a single
     // point quadrature. Consequently, one particle will be generated
     // at the centroid of each cell.
-    Simplex::QGauss<dim> quadrature_formula(1);
+    QGaussSimplex<dim> quadrature_formula(1);
 
     Particles::Generators::quadrature_points(particle_triangulation,
                                              quadrature_formula,

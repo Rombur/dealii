@@ -14,13 +14,12 @@
 // ---------------------------------------------------------------------
 
 
-// Test Simplex::BarycentricPolynomials on an the points of an arbitrary
+// Test BarycentricPolynomials on an the points of an arbitrary
 // quadrature rule.
 
 
+#include <deal.II/base/polynomials_barycentric.h>
 #include <deal.II/base/quadrature_lib.h>
-
-#include <deal.II/simplex/polynomials.h>
 
 #include "../tests.h"
 
@@ -30,8 +29,7 @@ template <int dim>
 void
 test(const unsigned int degree)
 {
-  const auto poly =
-    Simplex::BarycentricPolynomials<dim>::get_fe_p_basis(degree);
+  const auto    poly = BarycentricPolynomials<dim>::get_fe_p_basis(degree);
   QSimplex<dim> quad(QGauss<dim>(degree + 1));
 
   std::vector<double>         values(poly.n());

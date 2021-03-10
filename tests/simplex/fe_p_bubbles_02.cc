@@ -13,14 +13,19 @@
 //
 // ---------------------------------------------------------------------
 
-// Verify that FE_P_Bubbles can be used with a lumped mass matrix by computing a
-// convergence rate.
+// Verify that FE_SimplexP_Bubbles can be used with a lumped mass matrix by
+// computing a convergence rate.
 
 #include <deal.II/base/function_lib.h>
+#include <deal.II/base/quadrature_lib.h>
 
 #include <deal.II/dofs/dof_handler.h>
 
+#include <deal.II/fe/fe_pyramid_p.h>
+#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_simplex_p_bubbles.h>
 #include <deal.II/fe/fe_values.h>
+#include <deal.II/fe/fe_wedge_p.h>
 
 #include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/grid_tools.h>
@@ -29,9 +34,6 @@
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/vector_tools_integrate_difference.h>
 #include <deal.II/numerics/vector_tools_interpolate.h>
-
-#include <deal.II/simplex/fe_lib.h>
-#include <deal.II/simplex/quadrature_lib.h>
 
 #include "../tests.h"
 
@@ -44,14 +46,14 @@ compute_nodal_quadrature(const FiniteElement<dim, spacedim> &fe)
   Assert(fe.n_blocks() == 1, ExcNotImplemented());
   Assert(fe.n_components() == 1, ExcNotImplemented());
 
-  const ReferenceCell::Type type = fe.reference_cell_type();
+  const ReferenceCell type = fe.reference_cell();
 
   const Quadrature<dim> q_gauss =
-    ReferenceCell::get_gauss_type_quadrature<dim>(type, fe.tensor_degree() + 1);
+    type.get_gauss_type_quadrature<dim>(fe.tensor_degree() + 1);
   Triangulation<dim, spacedim> tria;
-  ReferenceCell::make_triangulation(type, tria);
+  GridGenerator::reference_cell(type, tria);
   const Mapping<dim, spacedim> &mapping =
-    ReferenceCell::get_default_linear_mapping<dim, spacedim>(type);
+    type.template get_default_linear_mapping<dim, spacedim>();
 
   auto                    cell = tria.begin_active();
   FEValues<dim, spacedim> fe_values(mapping,
@@ -108,21 +110,21 @@ test_interpolate()
           const Triangulation<dim, spacedim> &tria = trias[refinement_n];
           deallog << "number of cells = " << tria.n_active_cells() << std::endl;
 
-          Simplex::FE_P_Bubbles<dim, spacedim> fe(degree);
+          FE_SimplexP_Bubbles<dim, spacedim> fe(degree);
 
-          const ReferenceCell::Type type = fe.reference_cell_type();
+          const ReferenceCell       type = fe.reference_cell();
           DoFHandler<dim, spacedim> dh(tria);
           dh.distribute_dofs(fe);
           deallog << "number of dofs = " << dh.n_dofs() << std::endl;
 
           const Mapping<dim, spacedim> &map =
-            ReferenceCell::get_default_linear_mapping<dim, spacedim>(type);
+            type.template get_default_linear_mapping<dim, spacedim>();
 
           Vector<double> solution(dh.n_dofs());
           VectorTools::interpolate(map, dh, func, solution);
 
-          Simplex::QGauss<dim> error_quad(4);
-          Vector<double>       out_l2(tria.n_active_cells());
+          QGaussSimplex<dim> error_quad(4);
+          Vector<double>     out_l2(tria.n_active_cells());
           VectorTools::integrate_difference(
             map, dh, solution, func, out_l2, error_quad, VectorTools::L2_norm);
           const double new_error =
@@ -173,21 +175,21 @@ test_lumped_project()
           const Triangulation<dim, spacedim> &tria = trias[refinement_n];
           deallog << "number of cells = " << tria.n_active_cells() << std::endl;
 
-          Simplex::FE_P_Bubbles<dim, spacedim> fe(degree);
+          FE_SimplexP_Bubbles<dim, spacedim> fe(degree);
 
-          const ReferenceCell::Type type = fe.reference_cell_type();
+          const ReferenceCell       type = fe.reference_cell();
           DoFHandler<dim, spacedim> dh(tria);
           dh.distribute_dofs(fe);
           deallog << "number of dofs = " << dh.n_dofs() << std::endl;
           const Quadrature<dim> nodal_quad = compute_nodal_quadrature(fe);
-          const Quadrature<dim> cell_quad  = Simplex::QGauss<dim>(
+          const Quadrature<dim> cell_quad  = QGaussSimplex<dim>(
             std::max<unsigned int>(fe.tensor_degree() + 1, 2));
 
           Vector<double> lumped_mass(dh.n_dofs());
           Vector<double> consistent_rhs(dh.n_dofs());
 
           const Mapping<dim, spacedim> &map =
-            ReferenceCell::get_default_linear_mapping<dim, spacedim>(type);
+            type.template get_default_linear_mapping<dim, spacedim>();
 
           FEValues<dim> lumped_fev(map,
                                    fe,
@@ -230,8 +232,8 @@ test_lumped_project()
           for (std::size_t i = 0; i < solution.size(); ++i)
             solution[i] = consistent_rhs[i] / lumped_mass[i];
 
-          Simplex::QGauss<dim> error_quad(4);
-          Vector<double>       out_l2(tria.n_active_cells());
+          QGaussSimplex<dim> error_quad(4);
+          Vector<double>     out_l2(tria.n_active_cells());
           VectorTools::integrate_difference(
             map, dh, solution, func, out_l2, error_quad, VectorTools::L2_norm);
 

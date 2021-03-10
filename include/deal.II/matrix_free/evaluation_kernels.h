@@ -2549,7 +2549,7 @@ namespace internal
       if (data.element_type == MatrixFreeFunctions::tensor_none)
         {
           const unsigned int n_dofs     = data.dofs_per_component_on_cell;
-          const unsigned int n_q_points = data.n_q_points_face;
+          const unsigned int n_q_points = data.n_q_points_faces[face_no];
           const auto         shape_info = data.data.front();
 
           using Eval = EvaluatorTensorProduct<evaluate_general,
@@ -2704,7 +2704,7 @@ namespace internal
       if (data.element_type == MatrixFreeFunctions::tensor_none)
         {
           const unsigned int n_dofs     = data.dofs_per_component_on_cell;
-          const unsigned int n_q_points = data.n_q_points_face;
+          const unsigned int n_q_points = data.n_q_points_faces[face_no];
           const auto         shape_info = data.data.front();
 
           using Eval = EvaluatorTensorProduct<evaluate_general,
@@ -3523,8 +3523,6 @@ namespace internal
             else
               {
                 // case 5: default vector access
-                AssertDimension(n_face_orientations, 1);
-
                 // for the integrate_scatter path (integrate == true), we
                 // need to only prepare the data in this function for all
                 // components to later call distribute_local_to_global();
@@ -3541,8 +3539,6 @@ namespace internal
         else
           {
             // case 5: default vector access
-            AssertDimension(n_face_orientations, 1);
-
             proc.default_operation(temp1, comp);
             if (integrate)
               accesses_global_vector = false;

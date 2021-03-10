@@ -17,21 +17,24 @@
 // Like mapping_fe_fields_01 but for deformed meshes tested for linear and
 // quadratic mapping.
 
+#include <deal.II/base/quadrature_lib.h>
+
 #include <deal.II/dofs/dof_handler.h>
 
+#include <deal.II/fe/fe_pyramid_p.h>
+#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_simplex_p_bubbles.h>
 #include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_values.h>
+#include <deal.II/fe/fe_wedge_p.h>
 #include <deal.II/fe/mapping_fe.h>
 #include <deal.II/fe/mapping_fe_field.h>
 
+#include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/tria.h>
 
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/vector_tools.h>
-
-#include <deal.II/simplex/fe_lib.h>
-#include <deal.II/simplex/grid_generator.h>
-#include <deal.II/simplex/quadrature_lib.h>
 
 #include "../tests.h"
 
@@ -60,8 +63,8 @@ test(const unsigned int mapping_degree)
   Triangulation<dim> tria;
   GridGenerator::subdivided_hyper_cube_with_simplices(tria, 4);
 
-  Simplex::FE_P<dim> fe(mapping_degree);
-  FESystem<dim>      euler_fe(fe, dim);
+  FE_SimplexP<dim> fe(mapping_degree);
+  FESystem<dim>    euler_fe(fe, dim);
 
   DoFHandler<dim> dof_handler(tria);
   dof_handler.distribute_dofs(fe);
@@ -74,7 +77,7 @@ test(const unsigned int mapping_degree)
   // TODO: not working (missing mapping)
   // VectorTools::get_position_vector(euler_dof_handler, euler_vector);
 
-  MappingFE<dim> mapping_interpolation(Simplex::FE_P<dim>(1));
+  MappingFE<dim> mapping_interpolation(FE_SimplexP<dim>(1));
   VectorTools::interpolate(mapping_interpolation,
                            euler_dof_handler,
                            Solution<dim>(),

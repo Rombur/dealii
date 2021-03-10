@@ -58,11 +58,11 @@ test_2d()
   query_points.emplace_back(2.6, 2.6);
 
 
-  BVH              bvh(bounding_boxes);
-  PointIntersect   pt_intersect(query_points);
-  auto             indices_offset = bvh.query(pt_intersect);
-  std::vector<int> indices        = indices_offset.first;
-  std::vector<int> offset         = indices_offset.second;
+  ArborXWrappers::BVH            bvh(bounding_boxes);
+  ArborXWrappers::PointIntersect pt_intersect(query_points);
+  auto                           indices_offset = bvh.query(pt_intersect);
+  std::vector<int>               indices        = indices_offset.first;
+  std::vector<int>               offset         = indices_offset.second;
 
   std::vector<int> indices_ref = {0, 5, 10, 10};
   std::vector<int> offset_ref  = {0, 1, 2, 3, 4};
@@ -133,11 +133,11 @@ test_3d()
   query_points.emplace_back(2.6, 2.6, 2.6);
 
 
-  BVH              bvh(bounding_boxes);
-  PointIntersect   pt_intersect(query_points);
-  auto             indices_offset = bvh.query(pt_intersect);
-  std::vector<int> indices        = indices_offset.first;
-  std::vector<int> offset         = indices_offset.second;
+  ArborXWrappers::BVH            bvh(bounding_boxes);
+  ArborXWrappers::PointIntersect pt_intersect(query_points);
+  auto                           indices_offset = bvh.query(pt_intersect);
+  std::vector<int>               indices        = indices_offset.first;
+  std::vector<int>               offset         = indices_offset.second;
 
 
   std::vector<int> indices_ref = {0, 21, 42, 42};

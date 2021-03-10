@@ -18,14 +18,16 @@
 
 #include <deal.II/base/patterns.h>
 
+#include <deal.II/fe/fe_pyramid_p.h>
+#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_simplex_p_bubbles.h>
+#include <deal.II/fe/fe_wedge_p.h>
 #include <deal.II/fe/mapping_fe.h>
 
 #include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/tria.h>
 #include <deal.II/grid/tria_accessor.h>
 #include <deal.II/grid/tria_iterator.h>
-
-#include <deal.II/simplex/fe_lib.h>
 
 #include <fstream>
 
@@ -54,7 +56,7 @@ main()
   Triangulation<2> triangulation;
   make_grid(triangulation);
 
-  MappingFE<2> mapping(Simplex::FE_P<2>(1));
+  MappingFE<2> mapping(FE_SimplexP<2>(1));
 
   unsigned int n_points = 1;
 

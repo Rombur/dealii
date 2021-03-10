@@ -52,7 +52,7 @@ namespace
    *
    * Given that the elements of @p dof_values are stored in consecutive
    * locations, we can just memcpy them. Since floating point values don't
-   * compress well, we also forgo the compression the default
+   * compress well, we also waive the compression that the default
    * Utilities::pack() and Utilities::unpack() functions offer.
    */
   template <typename value_type>
@@ -121,8 +121,9 @@ namespace parallel
       , handle(numbers::invalid_unsigned_int)
     {
       Assert(
-        (dynamic_cast<const parallel::distributed::
-                        Triangulation<dim, DoFHandlerType::space_dimension> *>(
+        (dynamic_cast<const parallel::DistributedTriangulationBase<
+           dim,
+           DoFHandlerType::space_dimension> *>(
            &dof_handler->get_triangulation()) != nullptr),
         ExcMessage(
           "parallel::distributed::SolutionTransfer requires a parallel::distributed::Triangulation object."));
@@ -136,6 +137,10 @@ namespace parallel
       prepare_for_coarsening_and_refinement(
         const std::vector<const VectorType *> &all_in)
     {
+      for (unsigned int i = 0; i < all_in.size(); ++i)
+        Assert(all_in[i]->size() == dof_handler->n_dofs(),
+               ExcDimensionMismatch(all_in[i]->size(), dof_handler->n_dofs()));
+
       input_vectors = all_in;
       register_data_attach();
     }
@@ -147,12 +152,11 @@ namespace parallel
     SolutionTransfer<dim, VectorType, DoFHandlerType>::register_data_attach()
     {
       // TODO: casting away constness is bad
-      parallel::distributed::Triangulation<dim, DoFHandlerType::space_dimension>
-        *tria = (dynamic_cast<parallel::distributed::Triangulation<
-                   dim,
-                   DoFHandlerType::space_dimension> *>(
-          const_cast<dealii::Triangulation<dim, DoFHandlerType::space_dimension>
-                       *>(&dof_handler->get_triangulation())));
+      auto *tria = (dynamic_cast<parallel::DistributedTriangulationBase<
+                      dim,
+                      DoFHandlerType::space_dimension> *>(
+        const_cast<dealii::Triangulation<dim, DoFHandlerType::space_dimension>
+                     *>(&dof_handler->get_triangulation())));
       Assert(tria != nullptr, ExcInternalError());
 
       handle = tria->register_data_attach(
@@ -230,14 +234,16 @@ namespace parallel
     {
       Assert(input_vectors.size() == all_out.size(),
              ExcDimensionMismatch(input_vectors.size(), all_out.size()));
+      for (unsigned int i = 0; i < all_out.size(); ++i)
+        Assert(all_out[i]->size() == dof_handler->n_dofs(),
+               ExcDimensionMismatch(all_out[i]->size(), dof_handler->n_dofs()));
 
       // TODO: casting away constness is bad
-      parallel::distributed::Triangulation<dim, DoFHandlerType::space_dimension>
-        *tria = (dynamic_cast<parallel::distributed::Triangulation<
-                   dim,
-                   DoFHandlerType::space_dimension> *>(
-          const_cast<dealii::Triangulation<dim, DoFHandlerType::space_dimension>
-                       *>(&dof_handler->get_triangulation())));
+      auto *tria = (dynamic_cast<parallel::DistributedTriangulationBase<
+                      dim,
+                      DoFHandlerType::space_dimension> *>(
+        const_cast<dealii::Triangulation<dim, DoFHandlerType::space_dimension>
+                     *>(&dof_handler->get_triangulation())));
       Assert(tria != nullptr, ExcInternalError());
 
       tria->notify_ready_to_unpack(

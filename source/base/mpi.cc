@@ -260,11 +260,11 @@ namespace Utilities
 
     std::vector<IndexSet>
     create_ascending_partitioning(const MPI_Comm &          comm,
-                                  const IndexSet::size_type local_size)
+                                  const IndexSet::size_type locally_owned_size)
     {
       const unsigned int                     n_proc = n_mpi_processes(comm);
       const std::vector<IndexSet::size_type> sizes =
-        all_gather(comm, local_size);
+        all_gather(comm, locally_owned_size);
       const auto total_size =
         std::accumulate(sizes.begin(), sizes.end(), IndexSet::size_type(0));
 
@@ -368,9 +368,6 @@ namespace Utilities
         {
           (void)destination;
           AssertIndexRange(destination, n_procs);
-          Assert(destination != myid,
-                 ExcMessage(
-                   "There is no point in communicating with ourselves."));
         }
 
 #  if DEAL_II_MPI_VERSION_GTE(3, 0)
@@ -716,9 +713,9 @@ namespace Utilities
 
     std::vector<IndexSet>
     create_ascending_partitioning(const MPI_Comm & /*comm*/,
-                                  const IndexSet::size_type local_size)
+                                  const IndexSet::size_type locally_owned_size)
     {
-      return std::vector<IndexSet>(1, complete_index_set(local_size));
+      return std::vector<IndexSet>(1, complete_index_set(locally_owned_size));
     }
 
     IndexSet
@@ -1189,6 +1186,16 @@ namespace Utilities
 
       locked = false;
     }
+
+
+    template bool
+    logical_or<bool>(const bool &, const MPI_Comm &);
+
+
+    template void
+    logical_or<bool>(const ArrayView<const bool> &,
+                     const MPI_Comm &,
+                     const ArrayView<bool> &);
 
 
     template std::vector<unsigned int>

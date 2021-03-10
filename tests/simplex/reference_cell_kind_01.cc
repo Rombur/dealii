@@ -17,9 +17,9 @@
 // Test ReferenceCell::Kind::faces_for_given_vertex().
 
 
-#include <deal.II/grid/reference_cell.h>
+#include <deal.II/base/quadrature_lib.h>
 
-#include <deal.II/simplex/quadrature_lib.h>
+#include <deal.II/grid/reference_cell.h>
 
 #include "../tests.h"
 
@@ -27,12 +27,11 @@ using namespace dealii;
 
 template <int dim>
 void
-test(const ReferenceCell::Type &reference_cell)
+test(const ReferenceCell &reference_cell)
 {
-  const auto  kind = ReferenceCell::Type(reference_cell);
-  const auto &info = ReferenceCell::internal::Info::get_cell(reference_cell);
+  const auto kind = ReferenceCell(reference_cell);
 
-  for (const auto v : info.vertex_indices())
+  for (const auto v : reference_cell.vertex_indices())
     {
       deallog << v << ": ";
       for (const auto i : kind.faces_for_given_vertex(v))
@@ -49,11 +48,11 @@ main()
 {
   initlog();
 
-  test<2>(ReferenceCell::Type::Line);
-  test<2>(ReferenceCell::Type::Tri);
-  test<2>(ReferenceCell::Type::Quad);
-  test<3>(ReferenceCell::Type::Tet);
-  test<3>(ReferenceCell::Type::Pyramid);
-  test<3>(ReferenceCell::Type::Wedge);
-  test<3>(ReferenceCell::Type::Hex);
+  test<2>(ReferenceCells::Line);
+  test<2>(ReferenceCells::Triangle);
+  test<2>(ReferenceCells::Quadrilateral);
+  test<3>(ReferenceCells::Tetrahedron);
+  test<3>(ReferenceCells::Pyramid);
+  test<3>(ReferenceCells::Wedge);
+  test<3>(ReferenceCells::Hexahedron);
 }

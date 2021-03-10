@@ -16,48 +16,35 @@
 
 
 // verify hanging node constraints on locally h-refined simplex mesh
+//
+// dofs will be enumerated as follows
+//  scenario 1:
+//   1-------0
+//   |\      |
+//   |  \    |
+//   5---6   |
+//   |\  |\  |
+//   |  \|  \|
+//   3---4---2
+
 
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/dofs/dof_tools.h>
 
+#include <deal.II/fe/fe_pyramid_p.h>
+#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_simplex_p_bubbles.h>
+#include <deal.II/fe/fe_wedge_p.h>
+
+#include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/grid_out.h>
 #include <deal.II/grid/tria.h>
 
 #include <deal.II/lac/affine_constraints.h>
 
-#include <deal.II/simplex/fe_lib.h>
-#include <deal.II/simplex/grid_generator.h>
-
 #include "../tests.h"
 
-
-template <int dim>
-void
-test()
-{
-  // setup grid
-  Triangulation<dim> tria;
-  GridGenerator::subdivided_hyper_cube_with_simplices(tria, 1);
-
-  tria.begin_active()->set_refine_flag();
-  tria.execute_coarsening_and_refinement();
-
-#if false
-  GridOut grid_out;
-  grid_out.write_vtk(tria, deallog.get_file_stream());
-#endif
-
-  DoFHandler<dim> dofh(tria);
-  dofh.distribute_dofs(Simplex::FE_P<dim>(1));
-  deallog << "ndofs: " << dofh.n_dofs() << std::endl;
-
-  // hanging node constraints
-  AffineConstraints<double> constraints;
-  // DoFTools::make_hanging_node_constraints(dofh, constraints);
-  constraints.print(deallog.get_file_stream());
-
-  deallog << "OK" << std::endl;
-}
+#include "hanging_nodes.h"
 
 
 int
@@ -66,6 +53,22 @@ main()
   initlog();
 
   deallog.push("2d");
-  test<2>();
+  {
+    const unsigned int dim = 2;
+
+    const auto subdivided_hyper_cube_with_simplices =
+      [](Triangulation<dim> &tria) {
+        GridGenerator::subdivided_hyper_cube_with_simplices(tria, 1);
+      };
+
+    test<dim>({1, 0},
+              {0, 0},
+              hp::FECollection<dim>(FE_SimplexP<dim>(1)),
+              subdivided_hyper_cube_with_simplices);
+    test<dim>({1, 0},
+              {0, 0},
+              hp::FECollection<dim>(FE_SimplexP<dim>(2)),
+              subdivided_hyper_cube_with_simplices);
+  }
   deallog.pop();
 }

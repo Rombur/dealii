@@ -19,6 +19,7 @@
 #include <deal.II/base/mpi.templates.h>
 #include <deal.II/base/utilities.h>
 
+#include <deal.II/distributed/shared_tria.h>
 #include <deal.II/distributed/tria_base.h>
 
 #include <deal.II/grid/grid_tools.h>
@@ -90,7 +91,7 @@ namespace parallel
   {
     std::size_t mem =
       this->dealii::Triangulation<dim, spacedim>::memory_consumption() +
-      MemoryConsumption::memory_consumption(mpi_communicator) +
+      MemoryConsumption::memory_consumption(this->mpi_communicator) +
       MemoryConsumption::memory_consumption(my_subdomain) +
       MemoryConsumption::memory_consumption(
         number_cache.n_global_active_cells) +
@@ -135,7 +136,7 @@ namespace parallel
   }
 
   template <int dim, int spacedim>
-  const MPI_Comm &
+  MPI_Comm
   TriangulationBase<dim, spacedim>::get_communicator() const
   {
     return mpi_communicator;
@@ -170,7 +171,7 @@ namespace parallel
           number_cache.ghost_owners.insert(cell->subdomain_id());
 
       Assert(number_cache.ghost_owners.size() <
-               Utilities::MPI::n_mpi_processes(mpi_communicator),
+               Utilities::MPI::n_mpi_processes(this->mpi_communicator),
              ExcInternalError());
     }
 
@@ -289,28 +290,28 @@ namespace parallel
 
   template <int dim, int spacedim>
   void
-  TriangulationBase<dim, spacedim>::update_reference_cell_types()
+  TriangulationBase<dim, spacedim>::update_reference_cells()
   {
     // run algorithm for locally-owned cells
-    dealii::Triangulation<dim, spacedim>::update_reference_cell_types();
+    dealii::Triangulation<dim, spacedim>::update_reference_cells();
 
-    // translate ReferenceCell::Type to unsigned int (needed by
+    // translate ReferenceCell to unsigned int (needed by
     // Utilities::MPI::compute_set_union)
-    std::vector<unsigned int> reference_cell_types_ui;
+    std::vector<unsigned int> reference_cells_ui;
 
-    for (const auto &i : this->reference_cell_types)
-      reference_cell_types_ui.push_back(static_cast<unsigned int>(i));
+    for (const auto &i : this->reference_cells)
+      reference_cells_ui.push_back(static_cast<unsigned int>(i));
 
     // create union
-    reference_cell_types_ui =
-      Utilities::MPI::compute_set_union(reference_cell_types_ui,
+    reference_cells_ui =
+      Utilities::MPI::compute_set_union(reference_cells_ui,
                                         this->mpi_communicator);
 
     // transform back and store result
-    this->reference_cell_types.clear();
-    for (const auto &i : reference_cell_types_ui)
-      this->reference_cell_types.emplace_back(
-        ReferenceCell::internal::make_reference_cell_from_int(i));
+    this->reference_cells.clear();
+    for (const auto &i : reference_cells_ui)
+      this->reference_cells.emplace_back(
+        dealii::internal::ReferenceCell::make_reference_cell_from_int(i));
   }
 
 
@@ -380,11 +381,44 @@ namespace parallel
 #ifndef DEAL_II_WITH_MPI
     Assert(false, ExcNeedsMPI());
 #else
+    if (const auto pst =
+          dynamic_cast<const parallel::shared::Triangulation<dim, spacedim> *>(
+            this))
+      if (pst->with_artificial_cells() == false)
+        {
+          // Specialization for parallel::shared::Triangulation without
+          // artificial cells. The code below only works if a halo of a single
+          // ghost cells is needed.
 
-    // currently only implemented for distributed triangulations
-    if (dynamic_cast<const parallel::DistributedTriangulationBase<dim, spacedim>
-                       *>(this) == nullptr)
-      return;
+          std::vector<unsigned int> cell_counter(n_subdomains + 1);
+
+          // count number of cells of each process
+          for (const auto &cell : this->active_cell_iterators())
+            cell_counter[cell->subdomain_id() + 1]++;
+
+          // take prefix sum to obtain offset of each process
+          for (unsigned int i = 0; i < n_subdomains; ++i)
+            cell_counter[i + 1] += cell_counter[i];
+
+          // create partitioners
+          IndexSet is_local(cell_counter.back());
+          is_local.add_range(cell_counter[my_subdomain],
+                             cell_counter[my_subdomain + 1]);
+          IndexSet is_ghost(cell_counter.back());
+          number_cache.active_cell_index_partitioner =
+            std::make_shared<const Utilities::MPI::Partitioner>(
+              is_local, is_ghost, this->mpi_communicator);
+
+          // set global active cell indices and increment process-local counters
+          for (const auto &cell : this->active_cell_iterators())
+            cell->set_global_active_cell_index(
+              cell_counter[cell->subdomain_id()]++);
+
+          Assert(this->is_multilevel_hierarchy_constructed() == false,
+                 ExcNotImplemented());
+
+          return;
+        }
 
     // 1) determine number of active locally-owned cells
     const types::global_cell_index n_locally_owned_cells =
@@ -417,8 +451,8 @@ namespace parallel
       });
 
     // 5) set up new partitioner
-    IndexSet is_local(this->n_global_active_cells());
-    IndexSet is_ghost(this->n_global_active_cells());
+    std::vector<types::global_dof_index> is_local_vector;
+    std::vector<types::global_dof_index> is_ghost_vector;
 
     for (const auto &cell : this->active_cell_iterators())
       if (!cell->is_artificial())
@@ -429,13 +463,22 @@ namespace parallel
             continue;
 
           if (cell->is_locally_owned())
-            is_local.add_index(index);
+            is_local_vector.push_back(index);
           else
-            is_ghost.add_index(index);
+            is_ghost_vector.push_back(index);
         }
 
+    std::sort(is_local_vector.begin(), is_local_vector.end());
+    IndexSet is_local(this->n_global_active_cells());
+    is_local.add_indices(is_local_vector.begin(), is_local_vector.end());
+
+    std::sort(is_ghost_vector.begin(), is_ghost_vector.end());
+    IndexSet is_ghost(this->n_global_active_cells());
+    is_ghost.add_indices(is_ghost_vector.begin(), is_ghost_vector.end());
+
     number_cache.active_cell_index_partitioner =
-      Utilities::MPI::Partitioner(is_local, is_ghost, this->mpi_communicator);
+      std::make_shared<const Utilities::MPI::Partitioner>(
+        is_local, is_ghost, this->mpi_communicator);
 
     // 6) proceed with multigrid levels if requested
     if (this->is_multilevel_hierarchy_constructed() == true)
@@ -497,8 +540,8 @@ namespace parallel
         // 6) set up cell partitioners for each level
         for (unsigned int l = 0; l < this->n_global_levels(); ++l)
           {
-            IndexSet is_local(n_cells_level[l]);
-            IndexSet is_ghost(n_cells_level[l]);
+            std::vector<types::global_dof_index> is_local_vector;
+            std::vector<types::global_dof_index> is_ghost_vector;
 
             for (const auto &cell : this->cell_iterators_on_level(l))
               if (cell->level_subdomain_id() !=
@@ -511,15 +554,25 @@ namespace parallel
 
                   if (cell->level_subdomain_id() ==
                       this->locally_owned_subdomain())
-                    is_local.add_index(index);
+                    is_local_vector.push_back(index);
                   else
-                    is_ghost.add_index(index);
+                    is_ghost_vector.push_back(index);
+                  ;
                 }
 
+            IndexSet is_local(n_cells_level[l]);
+            std::sort(is_local_vector.begin(), is_local_vector.end());
+            is_local.add_indices(is_local_vector.begin(),
+                                 is_local_vector.end());
+
+            IndexSet is_ghost(n_cells_level[l]);
+            std::sort(is_ghost_vector.begin(), is_ghost_vector.end());
+            is_ghost.add_indices(is_ghost_vector.begin(),
+                                 is_ghost_vector.end());
+
             number_cache.level_cell_index_partitioners[l] =
-              Utilities::MPI::Partitioner(is_local,
-                                          is_ghost,
-                                          this->mpi_communicator);
+              std::make_shared<const Utilities::MPI::Partitioner>(
+                is_local, is_ghost, this->mpi_communicator);
           }
       }
 
@@ -579,14 +632,14 @@ namespace parallel
 
 
   template <int dim, int spacedim>
-  const Utilities::MPI::Partitioner &
+  const std::weak_ptr<const Utilities::MPI::Partitioner>
   TriangulationBase<dim, spacedim>::global_active_cell_index_partitioner() const
   {
     return number_cache.active_cell_index_partitioner;
   }
 
   template <int dim, int spacedim>
-  const Utilities::MPI::Partitioner &
+  const std::weak_ptr<const Utilities::MPI::Partitioner>
   TriangulationBase<dim, spacedim>::global_level_cell_index_partitioner(
     const unsigned int level) const
   {

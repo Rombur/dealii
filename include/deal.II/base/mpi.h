@@ -53,6 +53,9 @@ using MPI_Op       = int;
 #  ifndef MPI_SUM
 #    define MPI_SUM 0
 #  endif
+#  ifndef MPI_LOR
+#    define MPI_LOR 0
+#  endif
 #endif
 
 
@@ -445,16 +448,16 @@ namespace Utilities
 #endif
 
     /**
-     * Given the number of locally owned elements @p local_size,
-     * create a 1:1 partitioning of the of elements across the MPI communicator @p comm.
-     * The total size of elements is the sum of @p local_size across the MPI communicator.
-     * Each process will store contiguous subset of indices, and the index set
-     * on process p+1 starts at the index one larger than the last one stored on
-     * process p.
+     * Given the number of locally owned elements @p locally_owned_size,
+     * create a 1:1 partitioning of the of elements across the MPI
+     * communicator @p comm. The total size of elements is the sum of
+     * @p locally_owned_size across the MPI communicator.  Each process will
+     * store contiguous subset of indices, and the index set on process p+1
+     * starts at the index one larger than the last one stored on process p.
      */
     std::vector<IndexSet>
     create_ascending_partitioning(const MPI_Comm &          comm,
-                                  const IndexSet::size_type local_size);
+                                  const IndexSet::size_type locally_owned_size);
 
     /**
      * Given the total number of elements @p total_size, create an evenly
@@ -677,6 +680,66 @@ namespace Utilities
     min(const ArrayView<const T> &values,
         const MPI_Comm &          mpi_communicator,
         const ArrayView<T> &      minima);
+
+    /**
+     * Performs a <i>logical or</i> operation over all processors of the value
+     * @p t. The <i>logical or</i> operator `||` returns the boolean value
+     * `true` if either or all operands are `true` and returns `false`
+     * otherwise. If the provided value @p t corresponds to `0` in its
+     * associated data type `T`, it will be interpreted as `false`, and `true`
+     * otherwise. Data type `T` must be of type `integral`, i.e., `bool`,
+     * `char`, `short`, `int`, `long`, or any of their variations.
+     *
+     * This function is collective over all processors given in the
+     * @ref GlossMPICommunicator "communicator".
+     * If deal.II is not configured for use of MPI, this function simply
+     * returns the value of @p value. This function corresponds to the
+     * <code>MPI_Allreduce</code> function, i.e., all processors receive the
+     * result of this operation.
+     *
+     * @note Sometimes, not all processors need a result and in that case one
+     * would call the <code>MPI_Reduce</code> function instead of the
+     * <code>MPI_Allreduce</code> function. The latter is at most twice as
+     * expensive, so if you are concerned about performance, it may be
+     * worthwhile investigating whether your algorithm indeed needs the result
+     * everywhere.
+     */
+    template <typename T>
+    T
+    logical_or(const T &t, const MPI_Comm &mpi_communicator);
+
+    /**
+     * Like the previous function, but performs the <i>logical or</i> operation
+     * on each element of an array. In other words, the i-th element of the
+     * results array is the result of the <i>logical or</i> operation applied on
+     * the i-th entries of the input arrays from each processor. T and U must
+     * decay to the same type, e.g., they just differ by one of them having a
+     * const type qualifier and the other not.
+     *
+     * Input and output arrays may be the same.
+     *
+     * @note Depending on your standard library, this function may not work with
+     *   specializations of `std::vector` for the data type `bool`. In that
+     *   case, use a different container or data type.
+     */
+    template <typename T, typename U>
+    void
+    logical_or(const T &values, const MPI_Comm &mpi_communicator, U &results);
+
+    /**
+     * Like the previous function, but performs the <i>logical or</i> operation
+     * on each element of an array as specified by the ArrayView arguments.
+     * In other words, the i-th element of the results array is the result of
+     * the <i>logical or</i> operation applied on the i-th entries of the input
+     * arrays from each processor.
+     *
+     * Input and output arrays may be the same.
+     */
+    template <typename T>
+    void
+    logical_or(const ArrayView<const T> &values,
+               const MPI_Comm &          mpi_communicator,
+               const ArrayView<T> &      results);
 
     /**
      * A data structure to store the result of the min_max_avg() function.
@@ -1009,6 +1072,21 @@ namespace Utilities
            const unsigned int root_process = 0);
 
     /**
+     * A function that combines values @p local_value from all processes
+     * via a user-specified binary operation @p combiner and distributes the
+     * result back to all processes. As such this function is similar to
+     * MPI_Allreduce (if it were implemented by a global reduction followed
+     * by a broadcast step) but due to the user-specified binary operation also
+     * general object types, including ones that store variable amounts of data,
+     * can be handled.
+     */
+    template <typename T>
+    T
+    all_reduce(const T &                                     local_value,
+               const MPI_Comm &                              comm,
+               const std::function<T(const T &, const T &)> &combiner);
+
+    /**
      * Given a partitioned index set space, compute the owning MPI process rank
      * of each element of a second index set according to the partitioned index
      * set. A natural usage of this function is to compute for each ghosted
@@ -1114,6 +1192,21 @@ namespace Utilities
                            ArrayView<const T>(values, N),
                            mpi_communicator,
                            ArrayView<T>(minima, N));
+    }
+
+    template <typename T, unsigned int N>
+    void
+    logical_or(const T (&values)[N],
+               const MPI_Comm &mpi_communicator,
+               T (&results)[N])
+    {
+      static_assert(std::is_integral<T>::value,
+                    "The MPI_LOR operation only allows integral data types.");
+
+      internal::all_reduce(MPI_LOR,
+                           ArrayView<const T>(values, N),
+                           mpi_communicator,
+                           ArrayView<T>(results, N));
     }
 
     template <typename T>

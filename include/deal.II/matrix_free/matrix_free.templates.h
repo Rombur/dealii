@@ -23,6 +23,7 @@
 #include <deal.II/base/mpi.h>
 #include <deal.II/base/mpi_consensus_algorithms.h>
 #include <deal.II/base/polynomials_piecewise.h>
+#include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/tensor_product_polynomials.h>
 #include <deal.II/base/utilities.h>
 
@@ -40,8 +41,6 @@
 #include <deal.II/matrix_free/face_info.h>
 #include <deal.II/matrix_free/face_setup_internal.h>
 #include <deal.II/matrix_free/matrix_free.h>
-
-#include <deal.II/simplex/quadrature_lib.h>
 
 #ifdef DEAL_II_WITH_TBB
 #  include <deal.II/base/parallel.h>
@@ -135,33 +134,45 @@ namespace
   {
   public:
     FaceRangeCompartor(const std::vector<unsigned int> &fe_indices,
-                       const bool                       include)
+                       const bool                       include,
+                       const bool                       only_face_type)
       : fe_indices(fe_indices)
       , include(include)
+      , only_face_type(only_face_type)
     {}
 
     template <int vectorization_width>
     bool
     operator()(const internal::MatrixFreeFunctions::FaceToCellTopology<
-                 vectorization_width> &face,
-               const unsigned int &    fe_index)
+                 vectorization_width> &           face,
+               const std::array<unsigned int, 2> &fe_index)
     {
-      const unsigned int fe_index_face =
-        fe_indices[face.cells_interior[0] / vectorization_width];
+      const unsigned int face_type = face.face_type;
 
-      return fe_index_face < fe_index ||
-             (include ? (fe_index_face == fe_index) : false);
+      if (only_face_type)
+        return include ? (face_type <= fe_index[0]) : (face_type < fe_index[0]);
+
+      const std::array<unsigned int, 2> fe_index_face = {
+        {face_type, fe_indices[face.cells_interior[0] / vectorization_width]}};
+
+      return include ? (fe_index_face <= fe_index) : (fe_index_face < fe_index);
     }
 
     template <int vectorization_width>
     bool
     operator()(const internal::MatrixFreeFunctions::FaceToCellTopology<
-                 vectorization_width> &                     face,
-               const std::pair<unsigned int, unsigned int> &fe_index)
+                 vectorization_width> &           face,
+               const std::array<unsigned int, 3> &fe_index)
     {
-      const std::pair<unsigned int, unsigned int> fe_index_face = {
-        fe_indices[face.cells_interior[0] / vectorization_width],
-        fe_indices[face.cells_exterior[0] / vectorization_width]};
+      const unsigned int face_type = face.face_type;
+
+      if (only_face_type)
+        return include ? (face_type <= fe_index[0]) : (face_type < fe_index[0]);
+
+      const std::array<unsigned int, 3> fe_index_face = {
+        {face_type,
+         fe_indices[face.cells_interior[0] / vectorization_width],
+         fe_indices[face.cells_exterior[0] / vectorization_width]}};
 
       return include ? (fe_index_face <= fe_index) : (fe_index_face < fe_index);
     }
@@ -169,94 +180,9 @@ namespace
   private:
     const std::vector<unsigned int> &fe_indices;
     const bool                       include;
+    const bool                       only_face_type;
   };
 } // namespace
-
-
-
-template <int dim, typename Number, typename VectorizedArrayType>
-std::pair<unsigned int, unsigned int>
-MatrixFree<dim, Number, VectorizedArrayType>::
-  create_inner_face_subrange_hp_by_index(
-    const std::pair<unsigned int, unsigned int> &range,
-    const unsigned int                           fe_index_interior,
-    const unsigned int                           fe_index_exterior,
-    const unsigned int                           dof_handler_index) const
-{
-  if (dof_info[dof_handler_index].max_fe_index == 0 ||
-      dof_handlers[dof_handler_index]->get_fe_collection().size() == 1)
-    return range;
-
-  AssertIndexRange(fe_index_interior, dof_info[dof_handler_index].max_fe_index);
-  AssertIndexRange(fe_index_exterior, dof_info[dof_handler_index].max_fe_index);
-  const std::vector<unsigned int> &fe_indices =
-    dof_info[dof_handler_index].cell_active_fe_index;
-  if (fe_indices.empty() == true)
-    return range;
-  else
-    {
-      std::pair<unsigned int, unsigned int> return_range;
-      return_range.first =
-        std::lower_bound(face_info.faces.begin() + range.first,
-                         face_info.faces.begin() + range.second,
-                         std::pair<unsigned int, unsigned int>{
-                           fe_index_interior, fe_index_exterior},
-                         FaceRangeCompartor(fe_indices, false)) -
-        face_info.faces.begin();
-      return_range.second =
-        std::lower_bound(face_info.faces.begin() + return_range.first,
-                         face_info.faces.begin() + range.second,
-                         std::pair<unsigned int, unsigned int>{
-                           fe_index_interior, fe_index_exterior},
-                         FaceRangeCompartor(fe_indices, true)) -
-        face_info.faces.begin();
-      Assert(return_range.first >= range.first &&
-               return_range.second <= range.second,
-             ExcInternalError());
-      return return_range;
-    }
-}
-
-
-
-template <int dim, typename Number, typename VectorizedArrayType>
-std::pair<unsigned int, unsigned int>
-MatrixFree<dim, Number, VectorizedArrayType>::
-  create_boundary_face_subrange_hp_by_index(
-    const std::pair<unsigned int, unsigned int> &range,
-    const unsigned int                           fe_index,
-    const unsigned int                           dof_handler_index) const
-{
-  if (dof_info[dof_handler_index].max_fe_index == 0 ||
-      dof_handlers[dof_handler_index]->get_fe_collection().size() == 1)
-    return range;
-
-  AssertIndexRange(fe_index, dof_info[dof_handler_index].max_fe_index);
-  const std::vector<unsigned int> &fe_indices =
-    dof_info[dof_handler_index].cell_active_fe_index;
-  if (fe_indices.empty() == true)
-    return range;
-  else
-    {
-      std::pair<unsigned int, unsigned int> return_range;
-      return_range.first =
-        std::lower_bound(face_info.faces.begin() + range.first,
-                         face_info.faces.begin() + range.second,
-                         fe_index,
-                         FaceRangeCompartor(fe_indices, false)) -
-        face_info.faces.begin();
-      return_range.second =
-        std::lower_bound(face_info.faces.begin() + return_range.first,
-                         face_info.faces.begin() + range.second,
-                         fe_index,
-                         FaceRangeCompartor(fe_indices, true)) -
-        face_info.faces.begin();
-      Assert(return_range.first >= range.first &&
-               return_range.second <= range.second,
-             ExcInternalError());
-      return return_range;
-    }
-}
 
 
 
@@ -569,6 +495,250 @@ MatrixFree<dim, Number, VectorizedArrayType>::internal_reinit(
           // mapping_info...
           while (cell_level_index.size() % VectorizedArrayType::size() != 0)
             cell_level_index.push_back(cell_level_index.back());
+        }
+    }
+
+
+  // subdivide cell, face and boundary face partitioner data, s.t., all
+  // ranges have the same active_fe_indices
+  if (task_info.scheme != internal::MatrixFreeFunctions::TaskInfo::
+                            TasksParallelScheme::partition_color)
+    {
+      // ... for cells
+      {
+        auto &ptr  = task_info.cell_partition_data_hp_ptr;
+        auto &data = task_info.cell_partition_data_hp;
+
+        ptr  = {0};
+        data = {};
+        data.reserve(2 * task_info.cell_partition_data.size());
+
+        for (unsigned int i = 0; i < task_info.cell_partition_data.size() - 1;
+             ++i)
+          {
+            if (task_info.cell_partition_data[i + 1] >
+                task_info.cell_partition_data[i])
+              {
+                std::pair<unsigned int, unsigned int> range{
+                  task_info.cell_partition_data[i],
+                  task_info.cell_partition_data[i + 1]};
+
+                if (range.second > range.first)
+                  for (unsigned int i = 0; i < this->n_active_fe_indices(); ++i)
+                    {
+                      const auto cell_subrange =
+                        this->create_cell_subrange_hp_by_index(range, i);
+
+                      if (cell_subrange.second <= cell_subrange.first)
+                        continue;
+
+                      data.push_back(cell_subrange.first);
+                      data.push_back(cell_subrange.second);
+                    }
+              }
+
+            ptr.push_back(data.size() / 2);
+          }
+      }
+
+      // ... for inner faces
+      if (task_info.face_partition_data.empty() == false)
+        {
+          auto &ptr  = task_info.face_partition_data_hp_ptr;
+          auto &data = task_info.face_partition_data_hp;
+
+          ptr  = {0};
+          data = {};
+          data.reserve(2 * task_info.face_partition_data.size());
+
+          const auto create_inner_face_subrange_hp_by_index =
+            [&](const std::pair<unsigned int, unsigned int> &range,
+                const unsigned int                           face_type,
+                const unsigned int                           fe_index_interior,
+                const unsigned int                           fe_index_exterior,
+                const unsigned int                           dof_handler_index =
+                  0) -> std::pair<unsigned int, unsigned int> {
+            const unsigned int n_face_types =
+              std::max<unsigned int>(dim - 1, 1);
+
+            if ((dof_info[dof_handler_index].max_fe_index == 0 ||
+                 dof_handlers[dof_handler_index]->get_fe_collection().size() ==
+                   1) &&
+                n_face_types == 1)
+              return range;
+
+            AssertIndexRange(fe_index_interior,
+                             dof_info[dof_handler_index].max_fe_index);
+            AssertIndexRange(fe_index_exterior,
+                             dof_info[dof_handler_index].max_fe_index);
+            const std::vector<unsigned int> &fe_indices =
+              dof_info[dof_handler_index].cell_active_fe_index;
+            if (fe_indices.empty() == true && n_face_types == 1)
+              return range;
+            else
+              {
+                const bool only_face_type =
+                  dof_info[dof_handler_index].max_fe_index == 0 ||
+                  dof_handlers[dof_handler_index]->get_fe_collection().size() ==
+                    1 ||
+                  fe_indices.empty() == true;
+
+                std::pair<unsigned int, unsigned int> return_range;
+                return_range.first =
+                  std::lower_bound(
+                    face_info.faces.begin() + range.first,
+                    face_info.faces.begin() + range.second,
+                    std::array<unsigned int, 3>{
+                      {face_type, fe_index_interior, fe_index_exterior}},
+                    FaceRangeCompartor(fe_indices, false, only_face_type)) -
+                  face_info.faces.begin();
+                return_range.second =
+                  std::lower_bound(
+                    face_info.faces.begin() + return_range.first,
+                    face_info.faces.begin() + range.second,
+                    std::array<unsigned int, 3>{
+                      {face_type, fe_index_interior, fe_index_exterior}},
+                    FaceRangeCompartor(fe_indices, true, only_face_type)) -
+                  face_info.faces.begin();
+                Assert(return_range.first >= range.first &&
+                         return_range.second <= range.second,
+                       ExcInternalError());
+                return return_range;
+              }
+          };
+
+          for (unsigned int i = 0; i < task_info.face_partition_data.size() - 1;
+               ++i)
+            {
+              if (task_info.face_partition_data[i + 1] >
+                  task_info.face_partition_data[i])
+                {
+                  std::pair<unsigned int, unsigned int> range{
+                    task_info.face_partition_data[i],
+                    task_info.face_partition_data[i + 1]};
+
+                  if (range.second > range.first)
+                    for (unsigned int t = 0;
+                         t < std::max<unsigned int>(dim - 1, 1);
+                         ++t)
+                      for (unsigned int i = 0; i < this->n_active_fe_indices();
+                           ++i)
+                        for (unsigned int j = 0;
+                             j < this->n_active_fe_indices();
+                             ++j)
+                          {
+                            const auto subrange =
+                              create_inner_face_subrange_hp_by_index(range,
+                                                                     t,
+                                                                     i,
+                                                                     j);
+
+                            if (subrange.second <= subrange.first)
+                              continue;
+
+                            data.push_back(subrange.first);
+                            data.push_back(subrange.second);
+                          }
+                }
+
+              ptr.push_back(data.size() / 2);
+            }
+        }
+
+      // ... for boundary faces
+      if (task_info.boundary_partition_data.empty() == false)
+        {
+          auto &ptr  = task_info.boundary_partition_data_hp_ptr;
+          auto &data = task_info.boundary_partition_data_hp;
+
+          ptr  = {0};
+          data = {};
+          data.reserve(2 * task_info.boundary_partition_data.size());
+
+          const auto create_boundary_face_subrange_hp_by_index =
+            [&](const std::pair<unsigned int, unsigned int> &range,
+                const unsigned int                           face_type,
+                const unsigned int                           fe_index,
+                const unsigned int                           dof_handler_index =
+                  0) -> std::pair<unsigned int, unsigned int> {
+            const unsigned int n_face_types =
+              std::max<unsigned int>(dim - 1, 1);
+
+            if ((dof_info[dof_handler_index].max_fe_index == 0 ||
+                 dof_handlers[dof_handler_index]->get_fe_collection().size() ==
+                   1) &&
+                n_face_types == 1)
+              return range;
+
+            AssertIndexRange(fe_index,
+                             dof_info[dof_handler_index].max_fe_index);
+            const std::vector<unsigned int> &fe_indices =
+              dof_info[dof_handler_index].cell_active_fe_index;
+            if (fe_indices.empty() == true && n_face_types == 1)
+              return range;
+            else
+              {
+                const bool only_face_type =
+                  dof_info[dof_handler_index].max_fe_index == 0 ||
+                  dof_handlers[dof_handler_index]->get_fe_collection().size() ==
+                    1 ||
+                  fe_indices.empty() == true;
+
+                std::pair<unsigned int, unsigned int> return_range;
+                return_range.first =
+                  std::lower_bound(
+                    face_info.faces.begin() + range.first,
+                    face_info.faces.begin() + range.second,
+                    std::array<unsigned int, 2>{{face_type, fe_index}},
+                    FaceRangeCompartor(fe_indices, false, only_face_type)) -
+                  face_info.faces.begin();
+                return_range.second =
+                  std::lower_bound(
+                    face_info.faces.begin() + return_range.first,
+                    face_info.faces.begin() + range.second,
+                    std::array<unsigned int, 2>{{face_type, fe_index}},
+                    FaceRangeCompartor(fe_indices, true, only_face_type)) -
+                  face_info.faces.begin();
+                Assert(return_range.first >= range.first &&
+                         return_range.second <= range.second,
+                       ExcInternalError());
+                return return_range;
+              }
+          };
+
+          for (unsigned int i = 0;
+               i < task_info.boundary_partition_data.size() - 1;
+               ++i)
+            {
+              if (task_info.boundary_partition_data[i + 1] >
+                  task_info.boundary_partition_data[i])
+                {
+                  std::pair<unsigned int, unsigned int> range{
+                    task_info.boundary_partition_data[i],
+                    task_info.boundary_partition_data[i + 1]};
+
+                  if (range.second > range.first)
+                    for (unsigned int t = 0;
+                         t < std::max<unsigned int>(dim - 1, 1);
+                         ++t)
+                      for (unsigned int i = 0; i < this->n_active_fe_indices();
+                           ++i)
+                        {
+                          const auto cell_subrange =
+                            create_boundary_face_subrange_hp_by_index(range,
+                                                                      t,
+                                                                      i);
+
+                          if (cell_subrange.second <= cell_subrange.first)
+                            continue;
+
+                          data.push_back(cell_subrange.first);
+                          data.push_back(cell_subrange.second);
+                        }
+                }
+
+              ptr.push_back(data.size() / 2);
+            }
         }
     }
 
@@ -1471,7 +1641,7 @@ MatrixFree<dim, Number, VectorizedArrayType>::initialize_indices(
     shape_info.size(0), shape_info.size(2));
   {
     Quadrature<dim> quad(QGauss<dim>(1));
-    Quadrature<dim> quad_simplex(Simplex::QGauss<dim>(1));
+    Quadrature<dim> quad_simplex(QGaussSimplex<dim>(1));
     for (unsigned int no = 0, c = 0; no < dof_handlers.size(); no++)
       for (unsigned int b = 0;
            b < dof_handlers[no]->get_fe(0).n_base_elements();
@@ -1480,8 +1650,8 @@ MatrixFree<dim, Number, VectorizedArrayType>::initialize_indices(
              fe_no < dof_handlers[no]->get_fe_collection().size();
              ++fe_no)
           shape_info_dummy(c, fe_no).reinit(
-            dof_handlers[no]->get_fe(fe_no).reference_cell_type() ==
-                ReferenceCell::Type::get_hypercube<dim>() ?
+            dof_handlers[no]->get_fe(fe_no).reference_cell() ==
+                ReferenceCells::get_hypercube<dim>() ?
               quad :
               quad_simplex,
             dof_handlers[no]->get_fe(fe_no),

@@ -207,8 +207,9 @@ MappingFEField<dim, spacedim, VectorType, void>::MappingFEField(
                 true))
   , fe_to_real(fe_mask.size(), numbers::invalid_unsigned_int)
   , fe_values(this->euler_dof_handler->get_fe(),
-              ReferenceCell::get_nodal_type_quadrature<dim>(
-                this->euler_dof_handler->get_fe().reference_cell_type()),
+              this->euler_dof_handler->get_fe()
+                .reference_cell()
+                .template get_nodal_type_quadrature<dim>(),
               update_values)
 {
   unsigned int size = 0;
@@ -236,8 +237,9 @@ MappingFEField<dim, spacedim, VectorType, void>::MappingFEField(
                 true))
   , fe_to_real(fe_mask.size(), numbers::invalid_unsigned_int)
   , fe_values(this->euler_dof_handler->get_fe(),
-              ReferenceCell::get_nodal_type_quadrature<dim>(
-                this->euler_dof_handler->get_fe().reference_cell_type()),
+              this->euler_dof_handler->get_fe()
+                .reference_cell()
+                .template get_nodal_type_quadrature<dim>(),
               update_values)
 {
   unsigned int size = 0;
@@ -276,8 +278,9 @@ MappingFEField<dim, spacedim, VectorType, void>::MappingFEField(
                 true))
   , fe_to_real(fe_mask.size(), numbers::invalid_unsigned_int)
   , fe_values(this->euler_dof_handler->get_fe(),
-              ReferenceCell::get_nodal_type_quadrature<dim>(
-                this->euler_dof_handler->get_fe().reference_cell_type()),
+              this->euler_dof_handler->get_fe()
+                .reference_cell()
+                .template get_nodal_type_quadrature<dim>(),
               update_values)
 {
   unsigned int size = 0;
@@ -313,8 +316,9 @@ MappingFEField<dim, spacedim, VectorType, void>::MappingFEField(
   , fe_mask(mapping.fe_mask)
   , fe_to_real(mapping.fe_to_real)
   , fe_values(mapping.euler_dof_handler->get_fe(),
-              ReferenceCell::get_nodal_type_quadrature<dim>(
-                this->euler_dof_handler->get_fe().reference_cell_type()),
+              this->euler_dof_handler->get_fe()
+                .reference_cell()
+                .template get_nodal_type_quadrature<dim>(),
               update_values)
 {}
 
@@ -338,6 +342,23 @@ MappingFEField<dim, spacedim, VectorType, void>::preserves_vertex_locations()
   const
 {
   return false;
+}
+
+
+
+template <int dim, int spacedim, typename VectorType>
+bool
+MappingFEField<dim, spacedim, VectorType, void>::is_compatible_with(
+  const ReferenceCell &reference_cell) const
+{
+  Assert(dim == reference_cell.get_dimension(),
+         ExcMessage("The dimension of your mapping (" +
+                    Utilities::to_string(dim) +
+                    ") and the reference cell cell_type (" +
+                    Utilities::to_string(reference_cell.get_dimension()) +
+                    " ) do not agree."));
+
+  return euler_dof_handler->get_fe().reference_cell() == reference_cell;
 }
 
 
@@ -568,28 +589,26 @@ MappingFEField<dim, spacedim, VectorType, void>::compute_face_data(
 
 
           // TODO: only a single reference cell type possible...
-          const auto reference_cell_type =
-            this->euler_dof_handler->get_fe().reference_cell_type();
-          const auto n_faces =
-            ReferenceCell::internal::Info::get_cell(reference_cell_type)
-              .n_faces();
+          const auto reference_cell =
+            this->euler_dof_handler->get_fe().reference_cell();
+          const auto n_faces = reference_cell.n_faces();
 
           // Compute tangentials to the unit cell.
           for (unsigned int i = 0; i < n_faces; ++i)
             {
               data.unit_tangentials[i].resize(n_original_q_points);
-              std::fill(data.unit_tangentials[i].begin(),
-                        data.unit_tangentials[i].end(),
-                        reference_cell_type
-                          .template unit_tangential_vectors<dim>(i, 0));
+              std::fill(
+                data.unit_tangentials[i].begin(),
+                data.unit_tangentials[i].end(),
+                reference_cell.template unit_tangential_vectors<dim>(i, 0));
               if (dim > 2)
                 {
                   data.unit_tangentials[n_faces + i].resize(
                     n_original_q_points);
-                  std::fill(data.unit_tangentials[n_faces + i].begin(),
-                            data.unit_tangentials[n_faces + i].end(),
-                            reference_cell_type
-                              .template unit_tangential_vectors<dim>(i, 1));
+                  std::fill(
+                    data.unit_tangentials[n_faces + i].begin(),
+                    data.unit_tangentials[n_faces + i].end(),
+                    reference_cell.template unit_tangential_vectors<dim>(i, 1));
                 }
             }
         }
@@ -624,8 +643,9 @@ MappingFEField<dim, spacedim, VectorType, void>::get_face_data(
   std::unique_ptr<typename Mapping<dim, spacedim>::InternalDataBase> data_ptr =
     std::make_unique<InternalData>(euler_dof_handler->get_fe(), fe_mask);
   auto &                data = dynamic_cast<InternalData &>(*data_ptr);
-  const Quadrature<dim> q(QProjector<dim>::project_to_all_faces(
-    ReferenceCell::Type::get_hypercube<dim>(), quadrature[0]));
+  const Quadrature<dim> q(
+    QProjector<dim>::project_to_all_faces(ReferenceCells::get_hypercube<dim>(),
+                                          quadrature[0]));
   this->compute_face_data(update_flags, q, quadrature[0].size(), data);
 
   return data_ptr;
@@ -642,7 +662,7 @@ MappingFEField<dim, spacedim, VectorType, void>::get_subface_data(
     std::make_unique<InternalData>(euler_dof_handler->get_fe(), fe_mask);
   auto &                data = dynamic_cast<InternalData &>(*data_ptr);
   const Quadrature<dim> q(QProjector<dim>::project_to_all_subfaces(
-    ReferenceCell::Type::get_hypercube<dim>(), quadrature));
+    ReferenceCells::get_hypercube<dim>(), quadrature));
   this->compute_face_data(update_flags, q, quadrature.size(), data);
 
   return data_ptr;
@@ -1706,7 +1726,7 @@ MappingFEField<dim, spacedim, VectorType, void>::fill_fe_face_values(
       face_no,
       numbers::invalid_unsigned_int,
       QProjector<dim>::DataSetDescriptor::face(
-        ReferenceCell::Type::get_hypercube<dim>(),
+        ReferenceCells::get_hypercube<dim>(),
         face_no,
         cell->face_orientation(face_no),
         cell->face_flip(face_no),
@@ -1747,7 +1767,7 @@ MappingFEField<dim, spacedim, VectorType, void>::fill_fe_subface_values(
       face_no,
       numbers::invalid_unsigned_int,
       QProjector<dim>::DataSetDescriptor::subface(
-        ReferenceCell::Type::get_hypercube<dim>(),
+        ReferenceCells::get_hypercube<dim>(),
         face_no,
         subface_no,
         cell->face_orientation(face_no),
@@ -2070,9 +2090,8 @@ MappingFEField<dim, spacedim, VectorType, void>::transform_real_to_unit_cell(
   Point<dim> initial_p_unit;
   try
     {
-      initial_p_unit =
-        ReferenceCell::get_default_linear_mapping(cell->get_triangulation())
-          .transform_real_to_unit_cell(cell, p);
+      initial_p_unit = get_default_linear_mapping(cell->get_triangulation())
+                         .transform_real_to_unit_cell(cell, p);
     }
   catch (const typename Mapping<dim, spacedim>::ExcTransformationFailed &)
     {
@@ -2225,6 +2244,7 @@ MappingFEField<dim, spacedim, VectorType, void>::get_degree() const
 {
   return euler_dof_handler->get_fe().degree;
 }
+
 
 
 template <int dim, int spacedim, typename VectorType>

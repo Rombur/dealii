@@ -96,8 +96,8 @@ namespace parallel
     /**
      * Return MPI communicator used by this triangulation.
      */
-    virtual const MPI_Comm &
-    get_communicator() const;
+    virtual MPI_Comm
+    get_communicator() const override;
 
     /**
      * Return if multilevel hierarchy is supported and has been constructed.
@@ -206,14 +206,14 @@ namespace parallel
      * Return partitioner for the global indices of the cells on the active
      * level of the triangulation.
      */
-    const Utilities::MPI::Partitioner &
+    const std::weak_ptr<const Utilities::MPI::Partitioner>
     global_active_cell_index_partitioner() const;
 
     /**
      * Return partitioner for the global indices of the cells on the given @p
      * level of the triangulation.
      */
-    const Utilities::MPI::Partitioner &
+    const std::weak_ptr<const Utilities::MPI::Partitioner>
     global_level_cell_index_partitioner(const unsigned int level) const;
 
     /**
@@ -308,7 +308,7 @@ namespace parallel
      * communicator for this class, which is a duplicate of the one passed to
      * the constructor.
      */
-    MPI_Comm mpi_communicator;
+    const MPI_Comm mpi_communicator;
 
     /**
      * The subdomain id to be used for the current processor. This is the MPI
@@ -356,12 +356,14 @@ namespace parallel
       /**
        * Partitioner for the global active cell indices.
        */
-      Utilities::MPI::Partitioner active_cell_index_partitioner;
+      std::shared_ptr<const Utilities::MPI::Partitioner>
+        active_cell_index_partitioner;
 
       /**
        * Partitioner for the global level cell indices for each level.
        */
-      std::vector<Utilities::MPI::Partitioner> level_cell_index_partitioners;
+      std::vector<std::shared_ptr<const Utilities::MPI::Partitioner>>
+        level_cell_index_partitioners;
 
       NumberCache();
     };
@@ -375,10 +377,10 @@ namespace parallel
     update_number_cache();
 
     /**
-     * @copydoc dealii::Triangulation::update_reference_cell_types()
+     * @copydoc dealii::Triangulation::update_reference_cells()
      */
     void
-    update_reference_cell_types() override;
+    update_reference_cells() override;
 
     /**
      * Reset global active cell indices and global level cell indices.

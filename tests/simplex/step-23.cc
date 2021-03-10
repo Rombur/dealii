@@ -16,7 +16,7 @@
 
 // Step-23 with tetrahedron mesh. Following incompatible modifications had to be
 // made:
-// - Change FE_Q and QGauss to Simplex::FE_P and Simplex::QGauss.
+// - Change FE_Q and QGauss to FE_SimplexP and QGaussSimplex.
 // - Explicit use of MappingFE instead of the default mapping.
 // - Grid generation by subdivided_hyper_cube_with_simplices instead of
 // hyper_cube, because global refinement is not allowed.
@@ -50,11 +50,15 @@
 #include "../tests.h"
 
 // simplex
+#include <deal.II/base/quadrature_lib.h>
+
+#include <deal.II/fe/fe_pyramid_p.h>
+#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_simplex_p_bubbles.h>
+#include <deal.II/fe/fe_wedge_p.h>
 #include <deal.II/fe/mapping_fe.h>
 
-#include <deal.II/simplex/fe_lib.h>
-#include <deal.II/simplex/grid_generator.h>
-#include <deal.II/simplex/quadrature_lib.h>
+#include <deal.II/grid/grid_generator.h>
 
 // #define HEX
 
@@ -88,9 +92,9 @@ namespace Step23
     FE_Q<dim>                 fe;
     QGauss<dim>               quadrature;
 #else
-    MappingFE<dim, dim>  mapping;
-    Simplex::FE_P<dim>   fe;
-    Simplex::QGauss<dim> quadrature;
+    MappingFE<dim, dim> mapping;
+    FE_SimplexP<dim>    fe;
+    QGaussSimplex<dim>  quadrature;
 #endif
     DoFHandler<dim> dof_handler;
 
@@ -203,7 +207,7 @@ namespace Step23
 #ifdef HEX
     : mapping(1)
 #else
-    : mapping(Simplex::FE_P<dim>(1))
+    : mapping(FE_SimplexP<dim>(1))
 #endif
     , fe(1)
     , quadrature(fe.degree + 1)

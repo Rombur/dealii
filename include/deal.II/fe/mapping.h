@@ -402,6 +402,13 @@ public:
   preserves_vertex_locations() const = 0;
 
   /**
+   * Returns if this instance of Mapping is compatible with the type of cell
+   * in @p reference_cell.
+   */
+  virtual bool
+  is_compatible_with(const ReferenceCell &reference_cell) const = 0;
+
+  /**
    * @name Mapping points between reference and real cells
    * @{
    */
@@ -1276,6 +1283,18 @@ public:
   friend class FEFaceValues<dim, spacedim>;
   friend class FESubfaceValues<dim, spacedim>;
 };
+
+
+/**
+ * Return a default linear mapping that works for the given triangulation.
+ * Internally, this function calls the function above for the reference
+ * cell used by the given triangulation, assuming that the triangulation
+ * uses only a single cell type. If the triangulation uses mixed cell
+ * types, then this function will trigger an exception.
+ */
+template <int dim, int spacedim>
+const Mapping<dim, spacedim> &
+get_default_linear_mapping(const Triangulation<dim, spacedim> &triangulation);
 
 
 DEAL_II_NAMESPACE_CLOSE

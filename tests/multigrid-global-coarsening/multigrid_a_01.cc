@@ -55,9 +55,9 @@ test(const unsigned int n_refinements,
 
       if (do_simplex_mesh)
         {
-          fe      = std::make_unique<Simplex::FE_P<dim>>(fe_degree_fine);
-          quad    = std::make_unique<Simplex::QGauss<dim>>(fe_degree_fine + 1);
-          mapping = std::make_unique<MappingFE<dim>>(Simplex::FE_P<dim>(1));
+          fe      = std::make_unique<FE_SimplexP<dim>>(fe_degree_fine);
+          quad    = std::make_unique<QGaussSimplex<dim>>(fe_degree_fine + 1);
+          mapping = std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
         }
       else
         {
@@ -100,8 +100,9 @@ test(const unsigned int n_refinements,
                                                constraints[l + 1],
                                                constraints[l]);
 
-  MGTransferGlobalCoarsening<Operator<dim, Number>, VectorType> transfer(
-    operators, transfers);
+  MGTransferGlobalCoarsening<dim, VectorType> transfer(
+    transfers,
+    [&](const auto l, auto &vec) { operators[l].initialize_dof_vector(vec); });
 
   GMGParameters mg_data; // TODO
 
@@ -127,16 +128,30 @@ test(const unsigned int n_refinements,
           << (do_simplex_mesh ? "tri " : "quad") << " "
           << solver_control.last_step() << std::endl;
 
-  DataOut<dim> data_out;
-
-  data_out.attach_dof_handler(dof_handlers[max_level]);
-  data_out.add_data_vector(dst, "solution");
-  data_out.build_patches(*mapping_, 2);
-
   static unsigned int counter = 0;
-  std::ofstream       output("test." + std::to_string(dim) + "." +
-                       std::to_string(counter++) + ".vtk");
-  data_out.write_vtk(output);
+
+  MGLevelObject<VectorType> results(min_level, max_level);
+
+  transfer.interpolate_to_mg(dof_handlers[max_level], results, dst);
+
+  for (unsigned int l = min_level; l <= max_level; ++l)
+    {
+      DataOut<dim> data_out;
+
+      data_out.attach_dof_handler(dof_handlers[l]);
+      data_out.add_data_vector(
+        results[l],
+        "solution",
+        DataOut_DoFData<DoFHandler<dim>, dim>::DataVectorType::type_dof_data);
+      data_out.build_patches(*mapping_, 2);
+
+      std::ofstream output("test." + std::to_string(dim) + "." +
+                           std::to_string(counter) + "." + std::to_string(l) +
+                           ".vtk");
+      data_out.write_vtk(output);
+    }
+
+  counter++;
 }
 
 int
@@ -150,9 +165,6 @@ main(int argc, char **argv)
   for (unsigned int n_refinements = 2; n_refinements <= 4; ++n_refinements)
     for (unsigned int degree = 2; degree <= 4; ++degree)
       test<2>(n_refinements, degree, false /*quadrilateral*/);
-
-  return 0; // TODO: enable simplex test once MGTwoLevelTransfer works for
-            // simplex meshes
 
   for (unsigned int n_refinements = 2; n_refinements <= 4; ++n_refinements)
     for (unsigned int degree = 2; degree <= 2; ++degree)

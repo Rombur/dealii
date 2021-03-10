@@ -702,6 +702,38 @@ public:
   distribute_mg_dofs();
 
   /**
+   * Prepare all cells for p-adaptation in hp-mode. Does nothing in non-hp-mode.
+   *
+   * Essentially does to future FE indices what
+   * Triangulation::prepare_coarsening_and_refinement() does to refinement
+   * flags.
+   *
+   * In detail, this function limits the level difference of neighboring cells
+   * and thus smoothes the overall function space. Future FE indices will be
+   * raised (and never lowered) so that the level difference to neighboring
+   * cells is never larger than @p max_difference.
+   *
+   * Multiple FE hierarchies might have been registered via
+   * hp::FECollection::set_hierarchy(). This function operates on only one
+   * hierarchy, namely the one that contains the FE index @p contains_fe_index.
+   * Cells with future FE indices that are not part of the corresponding
+   * hierarchy will be ignored.
+   *
+   * The function can optionally be called before performing adaptation with
+   * Triangulation::execute_coarsening_and_refinement(). It is not necessary to
+   * call this function, nor will it be automatically invoked in any part of the
+   * library (contrary to its Triangulation counterpart).
+   *
+   * Returns whether any future FE indices have been changed by this function.
+   *
+   * @note Only implemented for serial applications.
+   */
+  bool
+  prepare_coarsening_and_refinement(
+    const unsigned int max_difference    = 1,
+    const unsigned int contains_fe_index = 0) const;
+
+  /**
    * Returns whether this DoFHandler has hp-capabilities.
    */
   bool
@@ -1268,6 +1300,12 @@ public:
   get_triangulation() const;
 
   /**
+   * Return MPI communicator used by the underlying triangulation.
+   */
+  MPI_Comm
+  get_communicator() const;
+
+  /**
    * Whenever serialization with a parallel::distributed::Triangulation as the
    * underlying triangulation is considered, we also need to consider storing
    * the active FE indices on all active cells as well.
@@ -1387,7 +1425,7 @@ public:
    * Exception used when a certain feature doesn't make sense when
    * DoFHandler does not hp-capabilities.
    */
-  DeclExceptionMsg(ExcNotAvailableWithoutHP,
+  DeclExceptionMsg(ExcOnlyAvailableWithHP,
                    "The current function doesn't make sense when used with a "
                    "DoFHandler without hp-capabilities.");
 
@@ -1661,6 +1699,13 @@ private:
   std::vector<boost::signals2::connection> tria_listeners;
 
   /**
+   * A list of connections with which this object connects to the
+   * triangulation. They get triggered specifially when data needs to be
+   * transferred due to refinement or repartitioning. Only active in hp-mode.
+   */
+  std::vector<boost::signals2::connection> tria_listeners_for_transfer;
+
+  /**
    * Free all memory used for non-multigrid data structures.
    */
   void
@@ -1694,14 +1739,13 @@ private:
                 const types::global_dof_index global_index) const;
 
   /**
-   * Setup DoFHandler policy.
+   * Set up DoFHandler policy.
    */
   void
   setup_policy();
 
   /**
-   * Setup connections to refinement signals of the underlying triangulation.
-   * Necessary for the hp-mode.
+   * Set up connections to signals of the underlying triangulation.
    */
   void
   connect_to_triangulation_signals();
@@ -1901,20 +1945,10 @@ DoFHandler<dim, spacedim>::n_locally_owned_dofs_per_processor() const
   if (number_cache.n_locally_owned_dofs_per_processor.empty() &&
       number_cache.n_global_dofs > 0)
     {
-      MPI_Comm comm;
-
-      const parallel::TriangulationBase<dim, spacedim> *tr =
-        (dynamic_cast<const parallel::TriangulationBase<dim, spacedim> *>(
-          &this->get_triangulation()));
-      if (tr != nullptr)
-        comm = tr->get_communicator();
-      else
-        comm = MPI_COMM_SELF;
-
       const_cast<dealii::internal::DoFHandlerImplementation::NumberCache &>(
         number_cache)
         .n_locally_owned_dofs_per_processor =
-        number_cache.get_n_locally_owned_dofs_per_processor(comm);
+        number_cache.get_n_locally_owned_dofs_per_processor(get_communicator());
     }
   return number_cache.n_locally_owned_dofs_per_processor;
 }
@@ -1928,20 +1962,10 @@ DoFHandler<dim, spacedim>::locally_owned_dofs_per_processor() const
   if (number_cache.locally_owned_dofs_per_processor.empty() &&
       number_cache.n_global_dofs > 0)
     {
-      MPI_Comm comm;
-
-      const parallel::TriangulationBase<dim, spacedim> *tr =
-        (dynamic_cast<const parallel::TriangulationBase<dim, spacedim> *>(
-          &this->get_triangulation()));
-      if (tr != nullptr)
-        comm = tr->get_communicator();
-      else
-        comm = MPI_COMM_SELF;
-
       const_cast<dealii::internal::DoFHandlerImplementation::NumberCache &>(
         number_cache)
         .locally_owned_dofs_per_processor =
-        number_cache.get_locally_owned_dofs_per_processor(comm);
+        number_cache.get_locally_owned_dofs_per_processor(get_communicator());
     }
   return number_cache.locally_owned_dofs_per_processor;
 }
@@ -1963,20 +1987,11 @@ DoFHandler<dim, spacedim>::locally_owned_mg_dofs_per_processor(
   if (mg_number_cache[level].locally_owned_dofs_per_processor.empty() &&
       mg_number_cache[level].n_global_dofs > 0)
     {
-      MPI_Comm comm;
-
-      const parallel::TriangulationBase<dim, spacedim> *tr =
-        (dynamic_cast<const parallel::TriangulationBase<dim, spacedim> *>(
-          &this->get_triangulation()));
-      if (tr != nullptr)
-        comm = tr->get_communicator();
-      else
-        comm = MPI_COMM_SELF;
-
       const_cast<dealii::internal::DoFHandlerImplementation::NumberCache &>(
         mg_number_cache[level])
         .locally_owned_dofs_per_processor =
-        mg_number_cache[level].get_locally_owned_dofs_per_processor(comm);
+        mg_number_cache[level].get_locally_owned_dofs_per_processor(
+          get_communicator());
     }
   return mg_number_cache[level].locally_owned_dofs_per_processor;
 }
@@ -2015,6 +2030,18 @@ DoFHandler<dim, spacedim>::get_triangulation() const
          ExcMessage("This DoFHandler object has not been associated "
                     "with a triangulation."));
   return *tria;
+}
+
+
+
+template <int dim, int spacedim>
+inline MPI_Comm
+DoFHandler<dim, spacedim>::get_communicator() const
+{
+  Assert(tria != nullptr,
+         ExcMessage("This DoFHandler object has not been associated "
+                    "with a triangulation."));
+  return tria->get_communicator();
 }
 
 
@@ -2243,6 +2270,15 @@ DoFHandler<dim, spacedim>::MGVertexDoFs::set_index(
          ExcInvalidLevel(level));
   indices[dofs_per_vertex * (level - coarsest_level) + dof_number] = index;
 }
+
+
+
+extern template class DoFHandler<1, 1>;
+extern template class DoFHandler<1, 2>;
+extern template class DoFHandler<1, 3>;
+extern template class DoFHandler<2, 2>;
+extern template class DoFHandler<2, 3>;
+extern template class DoFHandler<3, 3>;
 
 
 #endif // DOXYGEN

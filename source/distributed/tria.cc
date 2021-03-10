@@ -1179,7 +1179,7 @@ namespace parallel
         }
 
       Assert(
-        this->all_reference_cell_types_are_hyper_cube(),
+        this->all_reference_cells_are_hyper_cube(),
         ExcMessage(
           "The class parallel::distributed::Triangulation only supports meshes "
           "consisting only of hypercube-like cells."));
@@ -1427,7 +1427,7 @@ namespace parallel
       Assert(
         this->cell_attached_data.n_attached_deserialize == 0,
         ExcMessage(
-          "not all SolutionTransfer's got deserialized after the last load()"));
+          "Not all SolutionTransfer objects have been deserialized after the last call to load()."));
       Assert(this->n_cells() > 0,
              ExcMessage("Can not save() an empty Triangulation."));
 
@@ -1602,6 +1602,60 @@ namespace parallel
 
       // signal that de-serialization is finished
       this->signals.post_distributed_load();
+
+      this->update_periodic_face_map();
+      this->update_number_cache();
+    }
+
+
+
+    template <int dim, int spacedim>
+    void
+    Triangulation<dim, spacedim>::load(
+      const typename dealii::internal::p4est::types<dim>::forest *forest)
+    {
+      Assert(this->n_cells() > 0,
+             ExcMessage(
+               "load() only works if the Triangulation already contains "
+               "a coarse mesh!"));
+      Assert(this->n_cells() == forest->trees->elem_count,
+             ExcMessage(
+               "Coarse mesh of the Triangulation does not match the one "
+               "of the provided forest!"));
+
+      // clear the old forest
+      if (parallel_ghost != nullptr)
+        {
+          dealii::internal::p4est::functions<dim>::ghost_destroy(
+            parallel_ghost);
+          parallel_ghost = nullptr;
+        }
+      dealii::internal::p4est::functions<dim>::destroy(parallel_forest);
+      parallel_forest = nullptr;
+
+      // note: we can keep the connectivity, since the coarse grid does not
+      // change
+
+      // create deep copy of the new forest
+      typename dealii::internal::p4est::types<dim>::forest *temp =
+        const_cast<typename dealii::internal::p4est::types<dim>::forest *>(
+          forest);
+      parallel_forest =
+        dealii::internal::p4est::functions<dim>::copy_forest(temp, false);
+      parallel_forest->user_pointer = this;
+
+      try
+        {
+          copy_local_forest_to_triangulation();
+        }
+      catch (const typename Triangulation<dim>::DistortedCellList &)
+        {
+          // the underlying
+          // triangulation should not
+          // be checking for
+          // distorted cells
+          Assert(false, ExcInternalError());
+        }
 
       this->update_periodic_face_map();
       this->update_number_cache();
@@ -3213,6 +3267,11 @@ namespace parallel
     Triangulation<dim, spacedim>::copy_triangulation(
       const dealii::Triangulation<dim, spacedim> &other_tria)
     {
+      Assert(other_tria.n_levels() == 1,
+             ExcMessage(
+               "Parallel distributed triangulations can only be copied, "
+               "if they are not refined!"));
+
       try
         {
           dealii::parallel::TriangulationBase<dim, spacedim>::
@@ -3231,11 +3290,6 @@ namespace parallel
       // functions that do the actual work (which are dimension dependent, so
       // separate)
       triangulation_has_content = true;
-
-      Assert(other_tria.n_levels() == 1,
-             ExcMessage(
-               "Parallel distributed triangulations can only be copied, "
-               "if they are not refined!"));
 
       if (const dealii::parallel::distributed::Triangulation<dim, spacedim>
             *other_tria_x =

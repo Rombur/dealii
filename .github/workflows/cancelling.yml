@@ -1,7 +1,7 @@
-name: Cancelling
+name: cancel-duplicates
 on:
   workflow_run:
-    workflows: ['CI']
+    workflows: ['github-docker', 'github-linux', 'github-OSX', 'github-windows', 'indent']
     types: ['requested']
 
 jobs:
@@ -17,4 +17,3 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           sourceRunId: ${{ github.event.workflow_run.id }}
           notifyPRCancel: true
-          skipEventTypes: '["push", "schedule"]'

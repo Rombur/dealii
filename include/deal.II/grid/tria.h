@@ -1615,6 +1615,13 @@ public:
   clear();
 
   /**
+   * Return MPI communicator used by this triangulation. In the case of
+   * a serial Triangulation object, MPI_COMM_SELF is returned.
+   */
+  virtual MPI_Comm
+  get_communicator() const;
+
+  /**
    * Set the mesh smoothing to @p mesh_smoothing. This overrides the
    * MeshSmoothing given to the constructor. It is allowed to call this
    * function only if the triangulation is empty.
@@ -1830,7 +1837,9 @@ public:
    * @note This function is used in step-14 and step-19.
    *
    * @note This function triggers the "create" signal after doing its work. See
-   * the section on signals in the general documentation of this class.
+   * the section on signals in the general documentation of this class. For
+   * example as a consequence of this, all DoFHandler objects connected to
+   * this triangulation will be reinitialized via DoFHandler::reinit().
    *
    * @note The check for distorted cells is only done if dim==spacedim, as
    * otherwise cells can legitimately be twisted if the manifold they describe
@@ -3386,15 +3395,15 @@ public:
    * Return vector filled with the used reference-cell types of this
    * triangulation.
    */
-  const std::vector<ReferenceCell::Type> &
-  get_reference_cell_types() const;
+  const std::vector<ReferenceCell> &
+  get_reference_cells() const;
 
   /**
    * Indicate if the triangulation only consists of hypercube-like cells, i.e.,
    * lines, quadrilaterals, or hexahedra.
    */
   bool
-  all_reference_cell_types_are_hyper_cube() const;
+  all_reference_cells_are_hyper_cube() const;
 
 #ifdef DOXYGEN
   /**
@@ -3509,7 +3518,7 @@ protected:
    * Vector caching all reference-cell types of the given triangulation
    * (also in the distributed case).
    */
-  std::vector<ReferenceCell::Type> reference_cell_types;
+  std::vector<ReferenceCell> reference_cells;
 
   /**
    * Write a bool vector to the given stream, writing a pre- and a postfix
@@ -3548,10 +3557,10 @@ protected:
   update_periodic_face_map();
 
   /**
-   * Update the internal reference_cell_types vector.
+   * Update the internal reference_cells vector.
    */
   virtual void
-  update_reference_cell_types();
+  update_reference_cells();
 
 
 private:
@@ -4225,8 +4234,13 @@ Triangulation<dim, spacedim>::load(Archive &ar, const unsigned int)
   // this here. don't forget to first resize the fields appropriately
   {
     for (auto &level : levels)
-      level->active_cell_indices.resize(level->refine_flags.size());
+      {
+        level->active_cell_indices.resize(level->refine_flags.size());
+        level->global_active_cell_indices.resize(level->refine_flags.size());
+        level->global_level_cell_indices.resize(level->refine_flags.size());
+      }
     reset_active_cell_indices();
+    reset_global_cell_indices();
   }
 
 
@@ -4288,13 +4302,35 @@ unsigned int
 Triangulation<2, 2>::n_raw_quads(const unsigned int level) const;
 template <>
 unsigned int
-Triangulation<1, 1>::n_raw_hexs(const unsigned int level) const;
+Triangulation<3, 3>::n_raw_quads(const unsigned int level) const;
+template <>
+unsigned int
+Triangulation<3, 3>::n_raw_quads() const;
 template <>
 unsigned int
 Triangulation<1, 1>::n_active_quads(const unsigned int level) const;
 template <>
 unsigned int
 Triangulation<1, 1>::n_active_quads() const;
+template <>
+unsigned int
+Triangulation<1, 1>::n_raw_hexs(const unsigned int level) const;
+template <>
+unsigned int
+Triangulation<3, 3>::n_raw_hexs(const unsigned int level) const;
+template <>
+unsigned int
+Triangulation<3, 3>::n_hexs() const;
+template <>
+unsigned int
+Triangulation<3, 3>::n_active_hexs() const;
+template <>
+unsigned int
+Triangulation<3, 3>::n_active_hexs(const unsigned int) const;
+template <>
+unsigned int
+Triangulation<3, 3>::n_hexs(const unsigned int level) const;
+
 template <>
 unsigned int
 Triangulation<1, 1>::max_adjacent_cells() const;
@@ -4332,7 +4368,6 @@ Triangulation<1, 2>::max_adjacent_cells() const;
 // -------------------------------------------------------------------
 // -- Explicit specializations for codimension two grids
 
-
 template <>
 unsigned int
 Triangulation<1, 3>::n_quads() const;
@@ -4358,6 +4393,23 @@ template <>
 unsigned int
 Triangulation<1, 3>::max_adjacent_cells() const;
 
+template <>
+bool
+Triangulation<1, 1>::prepare_coarsening_and_refinement();
+template <>
+bool
+Triangulation<1, 2>::prepare_coarsening_and_refinement();
+template <>
+bool
+Triangulation<1, 3>::prepare_coarsening_and_refinement();
+
+
+extern template class Triangulation<1, 1>;
+extern template class Triangulation<1, 2>;
+extern template class Triangulation<1, 3>;
+extern template class Triangulation<2, 2>;
+extern template class Triangulation<2, 3>;
+extern template class Triangulation<3, 3>;
 
 #endif // DOXYGEN
 

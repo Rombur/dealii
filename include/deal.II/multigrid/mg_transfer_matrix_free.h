@@ -125,6 +125,12 @@ public:
     LinearAlgebra::distributed::Vector<Number> &      dst,
     const LinearAlgebra::distributed::Vector<Number> &src) const override;
 
+  virtual void
+  prolongate_and_add(
+    const unsigned int                                to_level,
+    LinearAlgebra::distributed::Vector<Number> &      dst,
+    const LinearAlgebra::distributed::Vector<Number> &src) const override;
+
   /**
    * Restrict a vector from level <tt>from_level</tt> to level
    * <tt>from_level-1</tt> using the transpose operation of the prolongate()
@@ -150,8 +156,10 @@ public:
     const LinearAlgebra::distributed::Vector<Number> &src) const override;
 
   /**
-   * Restrict fine-mesh field @p src to each multigrid level in @p dof_handler and
-   * store the result in @p dst.
+   * Interpolate fine-mesh field @p src to each multigrid level in
+   * @p dof_handler and store the result in @p dst. This function is different
+   * from restriction, where a weighted residual is
+   * transferred to a coarser level (transposition of prolongation matrix).
    *
    * The argument @p dst has to be initialized with the correct size according
    * to the number of levels of the triangulation.
@@ -382,6 +390,12 @@ public:
     LinearAlgebra::distributed::BlockVector<Number> &      dst,
     const LinearAlgebra::distributed::BlockVector<Number> &src) const override;
 
+  virtual void
+  prolongate_and_add(
+    const unsigned int                                     to_level,
+    LinearAlgebra::distributed::BlockVector<Number> &      dst,
+    const LinearAlgebra::distributed::BlockVector<Number> &src) const override;
+
   /**
    * Restrict a vector from level <tt>from_level</tt> to level
    * <tt>from_level-1</tt> using the transpose operation of the prolongate()
@@ -507,7 +521,7 @@ MGTransferMatrixFree<dim, Number>::interpolate_to_mg(
 
   for (unsigned int level = min_level; level <= max_level; ++level)
     if (dst[level].size() != dof_handler.n_dofs(level) ||
-        dst[level].local_size() !=
+        dst[level].locally_owned_size() !=
           dof_handler.locally_owned_mg_dofs(level).n_elements())
       dst[level].reinit(this->vector_partitioners[level]);
 
@@ -643,7 +657,7 @@ MGTransferBlockMatrixFree<dim, Number>::copy_to_mg(
             LinearAlgebra::distributed::Vector<Number> &v = dst[level].block(b);
             if (v.size() !=
                   dof_handler[b]->locally_owned_mg_dofs(level).size() ||
-                v.local_size() !=
+                v.locally_owned_size() !=
                   dof_handler[b]->locally_owned_mg_dofs(level).n_elements())
               {
                 do_reinit[level] = true;
@@ -662,8 +676,7 @@ MGTransferBlockMatrixFree<dim, Number>::copy_to_mg(
                 LinearAlgebra::distributed::Vector<Number> &v =
                   dst[level].block(b);
                 v.reinit(dof_handler[b]->locally_owned_mg_dofs(level),
-                         tria != nullptr ? tria->get_communicator() :
-                                           MPI_COMM_SELF);
+                         dof_handler[b]->get_communicator());
               }
             dst[level].collect_sizes();
           }

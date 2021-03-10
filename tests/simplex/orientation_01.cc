@@ -24,7 +24,7 @@
 
 template <unsigned int n_points>
 void
-test(const ReferenceCell::Type type, const unsigned int n_orientations)
+test(const ReferenceCell type, const unsigned int n_orientations)
 {
   for (unsigned int o = 0; o < n_orientations; ++o)
     {
@@ -46,9 +46,9 @@ main()
 {
   initlog();
 
-  test<2>(ReferenceCell::Type::Line, 2);
-  test<3>(ReferenceCell::Type::Tri, 3);
-  test<4>(ReferenceCell::Type::Quad, 4);
+  test<2>(ReferenceCells::Line, 2);
+  test<3>(ReferenceCells::Triangle, 3);
+  test<4>(ReferenceCells::Quadrilateral, 4);
 
   deallog << "OK!" << std::endl;
 }

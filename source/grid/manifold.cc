@@ -23,7 +23,9 @@
 #include <deal.II/grid/tria_accessor.h>
 #include <deal.II/grid/tria_iterator.h>
 
+DEAL_II_DISABLE_EXTRA_DIAGNOSTICS
 #include <boost/container/small_vector.hpp>
+DEAL_II_DISABLE_EXTRA_DIAGNOSTICS
 
 #include <cmath>
 #include <memory>
@@ -893,9 +895,9 @@ FlatManifold<dim, spacedim>::normal_vector(
 
   Point<facedim> xi;
 
-  const auto face_reference_cell_type = face->reference_cell_type();
+  const auto face_reference_cell = face->reference_cell();
 
-  if (face_reference_cell_type == ReferenceCell::Type::get_hypercube<facedim>())
+  if (face_reference_cell == ReferenceCells::get_hypercube<facedim>())
     {
       for (unsigned int i = 0; i < facedim; ++i)
         xi[i] = 1. / 2;
@@ -913,8 +915,8 @@ FlatManifold<dim, spacedim>::normal_vector(
     {
       Point<spacedim> F;
       for (const unsigned int v : face->vertex_indices())
-        F += face->vertex(v) *
-             face_reference_cell_type.d_linear_shape_function(xi, v);
+        F +=
+          face->vertex(v) * face_reference_cell.d_linear_shape_function(xi, v);
 
       for (unsigned int i = 0; i < facedim; ++i)
         {
@@ -922,8 +924,7 @@ FlatManifold<dim, spacedim>::normal_vector(
           for (const unsigned int v : face->vertex_indices())
             grad_F[i] +=
               face->vertex(v) *
-              face_reference_cell_type.d_linear_shape_function_gradient(xi,
-                                                                        v)[i];
+              face_reference_cell.d_linear_shape_function_gradient(xi, v)[i];
         }
 
       Tensor<1, facedim> J;

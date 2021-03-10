@@ -19,15 +19,14 @@
 #include <deal.II/base/config.h>
 
 #ifdef DEAL_II_WITH_SUNDIALS
-#  if DEAL_II_SUNDIALS_VERSION_GTE(5, 0, 0)
+#  include <sundials/sundials_nvector.h>
 
-#    include <sundials/sundials_nvector.h>
-
-#    include <memory>
+#  include <functional>
+#  include <memory>
 
 DEAL_II_NAMESPACE_OPEN
 
-#    ifndef DOXYGEN
+#  ifndef DOXYGEN
 namespace SUNDIALS
 {
   namespace internal
@@ -36,7 +35,7 @@ namespace SUNDIALS
     class NVectorView;
   }
 } // namespace SUNDIALS
-#    endif
+#  endif
 
 namespace SUNDIALS
 {
@@ -50,6 +49,9 @@ namespace SUNDIALS
      * @code
      *   auto view = make_nvector_view(vector);
      * @endcode
+     *
+     * The resulting object `view` must be kept around as long as any other
+     * object will use the internally viewed N_Vector.
      *
      * @tparam VectorType Type of the viewed vector. This parameter can be
      *   deduced automatically and will respect a potential const-qualifier.
@@ -119,11 +121,8 @@ namespace SUNDIALS
       /**
        * Default constructor.
        *
-       * @note This constructor exists for compilers that are not eliding the
-       *   copy in a statement like:
-       *   @code
-       *     auto view = make_nvector_view(vector);
-       *   @endcode
+       * The object is not actually viewing anything and needs to be assigned to
+       * with operator=(NVectorView &&).
        */
       NVectorView() = default;
 
@@ -185,6 +184,5 @@ namespace SUNDIALS
 
 DEAL_II_NAMESPACE_CLOSE
 
-#  endif
 #endif
 #endif

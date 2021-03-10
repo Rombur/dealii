@@ -17,21 +17,24 @@
 // Test MappingFEField and VectorTools::get_position_vector() for simplex
 // meshes.
 
+#include <deal.II/base/quadrature_lib.h>
+
 #include <deal.II/dofs/dof_handler.h>
 
+#include <deal.II/fe/fe_pyramid_p.h>
+#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_simplex_p_bubbles.h>
 #include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_values.h>
+#include <deal.II/fe/fe_wedge_p.h>
 #include <deal.II/fe/mapping_fe.h>
 #include <deal.II/fe/mapping_fe_field.h>
 
+#include <deal.II/grid/grid_generator.h>
 #include <deal.II/grid/tria.h>
 
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/vector_tools.h>
-
-#include <deal.II/simplex/fe_lib.h>
-#include <deal.II/simplex/grid_generator.h>
-#include <deal.II/simplex/quadrature_lib.h>
 
 #include "../tests.h"
 
@@ -45,8 +48,8 @@ test()
   Triangulation<dim> tria;
   GridGenerator::subdivided_hyper_cube_with_simplices(tria, 1);
 
-  Simplex::FE_P<dim> fe(1);
-  FESystem<dim>      euler_fe(fe, dim);
+  FE_SimplexP<dim> fe(1);
+  FESystem<dim>    euler_fe(fe, dim);
 
   DoFHandler<dim> dof_handler(tria);
   dof_handler.distribute_dofs(fe);
@@ -60,7 +63,7 @@ test()
 
   MappingFEField<dim> mapping(euler_dof_handler, euler_vector);
 
-  Simplex::QGauss<dim> quadrature_formula(1);
+  QGaussSimplex<dim> quadrature_formula(1);
 
   FEValues<dim> fe_values(mapping,
                           fe,

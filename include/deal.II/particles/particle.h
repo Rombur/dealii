@@ -28,56 +28,6 @@
 
 DEAL_II_NAMESPACE_OPEN
 
-namespace types
-{
-  /* Type definitions */
-
-#ifdef DEAL_II_WITH_64BIT_INDICES
-  /**
-   * The type used for indices of particles. While in
-   * sequential computations the 4 billion indices of 32-bit unsigned integers
-   * is plenty, parallel computations using hundreds of processes can overflow
-   * this number and we need a bigger index space. We here utilize the same
-   * build variable that controls the dof indices because the number
-   * of degrees of freedom and the number of particles are typically on the same
-   * order of magnitude.
-   *
-   * The data type always indicates an unsigned integer type.
-   */
-  using particle_index = uint64_t;
-
-#  ifdef DEAL_II_WITH_MPI
-  /**
-   * An identifier that denotes the MPI type associated with
-   * types::global_dof_index.
-   */
-#    define DEAL_II_PARTICLE_INDEX_MPI_TYPE MPI_UINT64_T
-#  endif
-
-#else
-  /**
-   * The type used for indices of particles. While in
-   * sequential computations the 4 billion indices of 32-bit unsigned integers
-   * is plenty, parallel computations using hundreds of processes can overflow
-   * this number and we need a bigger index space. We here utilize the same
-   * build variable that controls the dof indices because the number
-   * of degrees of freedom and the number of particles are typically on the same
-   * order of magnitude.
-   *
-   * The data type always indicates an unsigned integer type.
-   */
-  using particle_index = unsigned int;
-
-#  ifdef DEAL_II_WITH_MPI
-  /**
-   * An identifier that denotes the MPI type associated with
-   * types::global_dof_index.
-   */
-#    define DEAL_II_PARTICLE_INDEX_MPI_TYPE MPI_UNSIGNED
-#  endif
-#endif
-} // namespace types
-
 /**
  * A namespace that contains all classes that are related to the particle
  * implementation, in particular the fundamental Particle class.
@@ -237,17 +187,18 @@ namespace Particles
      * and later de-serializing the properties by calling the appropriate
      * constructor Particle(void *&data, PropertyPool *property_pool = nullptr);
      *
-     * @param [in,out] data The memory location to write particle data
-     * into. This pointer points to the begin of the memory, in which the
-     * data will be written and it will be advanced by the serialized size
-     * of this particle.
+     * @param [in] data The memory location to write particle data
+     *   into.
+     *
+     * @return A pointer to the next byte after the array to which data has
+     *   been written.
      */
-    void
-    write_data(void *&data) const;
+    void *
+    write_particle_data_to_memory(void *data) const;
 
 
     /**
-     * Update all of the data associated with a particle : id,
+     * Update all of the data associated with a particle: id,
      * location, reference location and, if any, properties by using a
      * data array. The array is expected to be large enough to take the data,
      * and the void pointer should point to the first entry of the array to
@@ -256,13 +207,15 @@ namespace Particles
      * class be built. This is used in the ParticleHandler to update the
      * ghost particles without de-allocating and re-allocating memory.
      *
-     * @param[in,out] data A pointer to a memory location from which
+     * @param[in] data A pointer to a memory location from which
      * to read the information that completely describes a particle. This
-     * class then de-serializes its data from this memory location and
-     * advance the pointer accordingly.
+     * class then de-serializes its data from this memory location.
+     *
+     * @return A pointer to the next byte after the array from which data has
+     *   been read.
      */
-    void
-    update_particle_data(const void *&data);
+    const void *
+    read_particle_data_from_memory(const void *data);
 
     /**
      * Set the location of this particle. Note that this does not check
@@ -480,11 +433,6 @@ namespace Particles
     static PropertyPool<dim, spacedim> global_property_pool;
 
     /**
-     * Globally unique ID of particle.
-     */
-    types::particle_index id;
-
-    /**
      * A pointer to the property pool. Necessary to translate from the
      * handle to the actual memory locations.
      */
@@ -507,12 +455,14 @@ namespace Particles
   {
     unsigned int n_properties = 0;
 
-    Point<spacedim> location;
-    Point<dim>      reference_location;
+    Point<spacedim>       location;
+    Point<dim>            reference_location;
+    types::particle_index id;
     ar &location &reference_location &id &n_properties;
 
     set_location(location);
     set_reference_location(reference_location);
+    set_id(id);
 
     if (n_properties > 0)
       {
@@ -542,8 +492,9 @@ namespace Particles
         (property_pool_handle != PropertyPool<dim, spacedim>::invalid_handle))
       n_properties = get_properties().size();
 
-    Point<spacedim> location           = get_location();
-    Point<dim>      reference_location = get_reference_location();
+    Point<spacedim>       location           = get_location();
+    Point<dim>            reference_location = get_reference_location();
+    types::particle_index id                 = get_id();
 
     ar &location &reference_location &id &n_properties;
 
@@ -594,7 +545,7 @@ namespace Particles
   inline types::particle_index
   Particle<dim, spacedim>::get_id() const
   {
-    return id;
+    return property_pool->get_id(property_pool_handle);
   }
 
 
@@ -603,7 +554,7 @@ namespace Particles
   inline void
   Particle<dim, spacedim>::set_id(const types::particle_index &new_id)
   {
-    id = new_id;
+    property_pool->set_id(property_pool_handle, new_id);
   }
 
 
@@ -627,8 +578,9 @@ namespace Particles
     const typename PropertyPool<dim, spacedim>::Handle new_handle =
       new_property_pool.register_particle();
 
-    const Point<spacedim> location           = get_location();
-    const Point<dim>      reference_location = get_reference_location();
+    const Point<spacedim>       location           = get_location();
+    const Point<dim>            reference_location = get_reference_location();
+    const types::particle_index id                 = get_id();
 
     if (/* old pool */ has_properties())
       {
@@ -652,6 +604,7 @@ namespace Particles
     // Now also store the saved locations
     set_location(location);
     set_reference_location(reference_location);
+    set_id(id);
   }
 
 

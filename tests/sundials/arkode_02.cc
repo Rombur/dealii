@@ -57,7 +57,7 @@ main(int argc, char **argv)
   Utilities::MPI::MPI_InitFinalize mpi_initialization(
     argc, argv, numbers::invalid_unsigned_int);
 
-  typedef Vector<double> VectorType;
+  using VectorType = Vector<double>;
 
   ParameterHandler                             prm;
   SUNDIALS::ARKode<VectorType>::AdditionalData data;
@@ -68,8 +68,6 @@ main(int argc, char **argv)
   prm.parse_input(ifile);
 
   SUNDIALS::ARKode<VectorType> ode(data);
-
-  ode.reinit_vector = [&](VectorType &v) { v.reinit(2); };
 
   double kappa = 1.0;
 

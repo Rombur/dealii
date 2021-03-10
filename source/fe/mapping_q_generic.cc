@@ -34,7 +34,9 @@
 #include <deal.II/grid/tria.h>
 #include <deal.II/grid/tria_iterator.h>
 
+DEAL_II_DISABLE_EXTRA_DIAGNOSTICS
 #include <boost/container/small_vector.hpp>
+DEAL_II_ENABLE_EXTRA_DIAGNOSTICS
 
 #include <algorithm>
 #include <array>
@@ -885,8 +887,7 @@ MappingQGeneric<dim, spacedim>::get_face_data(
   auto &data = dynamic_cast<InternalData &>(*data_ptr);
   data.initialize_face(this->requires_update_flags(update_flags),
                        QProjector<dim>::project_to_all_faces(
-                         ReferenceCell::Type::get_hypercube<dim>(),
-                         quadrature[0]),
+                         ReferenceCells::get_hypercube<dim>(), quadrature[0]),
                        quadrature[0].size());
 
   return data_ptr;
@@ -905,7 +906,7 @@ MappingQGeneric<dim, spacedim>::get_subface_data(
   auto &data = dynamic_cast<InternalData &>(*data_ptr);
   data.initialize_face(this->requires_update_flags(update_flags),
                        QProjector<dim>::project_to_all_subfaces(
-                         ReferenceCell::Type::get_hypercube<dim>(), quadrature),
+                         ReferenceCells::get_hypercube<dim>(), quadrature),
                        quadrature.size());
 
   return data_ptr;
@@ -1171,7 +1172,7 @@ MappingQGeneric<dim, spacedim>::fill_fe_face_values(
     face_no,
     numbers::invalid_unsigned_int,
     QProjector<dim>::DataSetDescriptor::face(
-      ReferenceCell::Type::get_hypercube<dim>(),
+      ReferenceCells::get_hypercube<dim>(),
       face_no,
       cell->face_orientation(face_no),
       cell->face_flip(face_no),
@@ -1219,7 +1220,7 @@ MappingQGeneric<dim, spacedim>::fill_fe_subface_values(
     face_no,
     subface_no,
     QProjector<dim>::DataSetDescriptor::subface(
-      ReferenceCell::Type::get_hypercube<dim>(),
+      ReferenceCells::get_hypercube<dim>(),
       face_no,
       subface_no,
       cell->face_orientation(face_no),
@@ -1648,6 +1649,23 @@ MappingQGeneric<dim, spacedim>::get_bounding_box(
   const typename Triangulation<dim, spacedim>::cell_iterator &cell) const
 {
   return BoundingBox<spacedim>(this->compute_mapping_support_points(cell));
+}
+
+
+
+template <int dim, int spacedim>
+bool
+MappingQGeneric<dim, spacedim>::is_compatible_with(
+  const ReferenceCell &reference_cell) const
+{
+  Assert(dim == reference_cell.get_dimension(),
+         ExcMessage("The dimension of your mapping (" +
+                    Utilities::to_string(dim) +
+                    ") and the reference cell cell_type (" +
+                    Utilities::to_string(reference_cell.get_dimension()) +
+                    " ) do not agree."));
+
+  return reference_cell.is_hyper_cube();
 }
 
 
