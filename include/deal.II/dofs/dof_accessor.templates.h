@@ -1337,7 +1337,8 @@ namespace internal
         Assert(
           dim == structdim,
           ExcMessage(
-            "This function is intended to be used for DoFCellAccessor, i.e., dimension == structdim."));
+            "This function is intended to be used for DoFCellAccessor, i.e., "
+            "dimension == structdim."));
 
         process_dof_indices(
           accessor,
@@ -2600,6 +2601,9 @@ inline void
 DoFCellAccessor<dimension_, space_dimension_, level_dof_access>::
   get_mg_dof_indices(std::vector<types::global_dof_index> &dof_indices) const
 {
+  Assert(this->dof_handler->mg_vertex_dofs.size() > 0,
+         ExcMessage("Multigrid DoF indices can only be accessed after "
+                    "DoFHandler::distribute_mg_dofs() has been called!"));
   DoFAccessor<dimension_, dimension_, space_dimension_, level_dof_access>::
     get_mg_dof_indices(this->level(), dof_indices);
 }
@@ -2611,6 +2615,9 @@ inline void
 DoFCellAccessor<dimension_, space_dimension_, level_dof_access>::
   set_mg_dof_indices(const std::vector<types::global_dof_index> &dof_indices)
 {
+  Assert(this->dof_handler->mg_vertex_dofs.size() > 0,
+         ExcMessage("Multigrid DoF indices can only be accessed after "
+                    "DoFHandler::distribute_mg_dofs() has been called!"));
   DoFAccessor<dimension_, dimension_, space_dimension_, level_dof_access>::
     set_mg_dof_indices(this->level(), dof_indices);
 }
@@ -2759,10 +2766,10 @@ DoFCellAccessor<dimension_, space_dimension_, level_dof_access>::get_fe() const
 
   const auto &fe = this->dof_handler->get_fe(active_fe_index());
 
-  Assert(
-    this->reference_cell() == fe.reference_cell(),
-    ExcMessage(
-      "The reference-cell type of the cell does not match the one of the finite element!"));
+  Assert(this->reference_cell() == fe.reference_cell(),
+         ExcMessage(
+           "The reference-cell type of the cell does not match the one of the "
+           "finite element!"));
 
   return fe;
 }
@@ -2945,6 +2952,11 @@ DoFCellAccessor<dimension_, space_dimension_, level_dof_access>::
         ExcMessage(
           "You ask for information on children of this cell which is only "
           "available for active cells. One of its children is not active."));
+      Assert(child->is_locally_owned(),
+             ExcMessage(
+               "You ask for information on children of this cell which is only "
+               "available for locally owned cells. One of its children is not "
+               "locally owned."));
       future_fe_indices_children.insert(child->future_fe_index());
     }
   Assert(!future_fe_indices_children.empty(), ExcInternalError());

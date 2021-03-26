@@ -24,14 +24,16 @@
 #include <deal.II/base/point.h>
 #include <deal.II/base/utilities.h>
 
+#include <deal.II/distributed/shared_tria.h>
+
 #include <deal.II/dofs/dof_handler.h>
 
 #include <deal.II/fe/fe_q.h>
 
 #include <deal.II/grid/grid_generator.h>
-#include <deal.II/grid/tria.h>
 
 #include <deal.II/hp/fe_collection.h>
+#include <deal.II/hp/refinement.h>
 
 #include <vector>
 
@@ -40,7 +42,9 @@
 
 template <int dim>
 void
-test(const unsigned int fes_size, const unsigned int max_difference)
+test(const unsigned int fes_size,
+     const unsigned int max_difference,
+     const bool         allow_artificial_cells)
 {
   Assert(fes_size > 0, ExcInternalError());
   Assert(max_difference > 0, ExcInternalError());
@@ -54,7 +58,9 @@ test(const unsigned int fes_size, const unsigned int max_difference)
   const auto         sequence = fes.get_hierarchy_sequence(contains_fe_index);
 
   // setup cross-shaped mesh
-  Triangulation<dim> tria;
+  parallel::shared::Triangulation<dim> tria(MPI_COMM_WORLD,
+                                            Triangulation<dim>::none,
+                                            allow_artificial_cells);
   {
     std::vector<unsigned int> sizes(Utilities::pow(2, dim),
                                     static_cast<unsigned int>(
@@ -68,32 +74,41 @@ test(const unsigned int fes_size, const unsigned int max_difference)
   DoFHandler<dim> dofh(tria);
   dofh.distribute_dofs(fes);
 
-  // set center to highest p-level
-  const auto center_cell = dofh.begin();
-  Assert(center_cell->center() == Point<dim>(), ExcInternalError());
+  // set center cell to highest p-level
+  for (const auto &cell : dofh.active_cell_iterators())
+    if (cell->is_locally_owned() && cell->center() == Point<dim>())
+      cell->set_active_fe_index(sequence.back());
 
-  center_cell->set_active_fe_index(sequence.back());
-  dofh.prepare_coarsening_and_refinement(max_difference, contains_fe_index);
+  const bool fe_indices_changed =
+    hp::Refinement::limit_p_level_difference(dofh,
+                                             max_difference,
+                                             contains_fe_index);
   tria.execute_coarsening_and_refinement();
+
+  (void)fe_indices_changed;
+  Assert(fe_indices_changed, ExcInternalError());
 
   // display number of cells for each FE index
   std::vector<unsigned int> count(fes.size(), 0);
   for (const auto &cell : dofh.active_cell_iterators())
-    count[cell->active_fe_index()]++;
+    if (cell->is_locally_owned())
+      count[cell->active_fe_index()]++;
+  Utilities::MPI::sum(count, tria.get_communicator(), count);
   deallog << "fe count:" << count << std::endl;
 
 #ifdef DEBUG
   // check each cell's active FE index by its distance from the center
   for (const auto &cell : dofh.active_cell_iterators())
-    {
-      const double distance = cell->center().distance(center_cell->center());
-      const unsigned int expected_level =
-        (sequence.size() - 1) -
-        max_difference * static_cast<unsigned int>(std::round(distance));
+    if (cell->is_locally_owned())
+      {
+        const double       distance = cell->center().distance(Point<dim>());
+        const unsigned int expected_level =
+          (sequence.size() - 1) -
+          max_difference * static_cast<unsigned int>(std::round(distance));
 
-      Assert(cell->active_fe_index() == sequence[expected_level],
-             ExcInternalError());
-    }
+        Assert(cell->active_fe_index() == sequence[expected_level],
+               ExcInternalError());
+      }
 #endif
 
   deallog << "OK" << std::endl;
@@ -101,11 +116,19 @@ test(const unsigned int fes_size, const unsigned int max_difference)
 
 
 int
-main()
+main(int argc, char *argv[])
 {
-  initlog();
+  Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
 
-  test<2>(4, 1);
-  test<2>(8, 2);
-  test<2>(12, 3);
+  if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
+    initlog();
+
+  deallog << std::boolalpha;
+  for (const bool allow_artificial_cells : {false, true})
+    {
+      deallog << "artificial cells: " << allow_artificial_cells << std::endl;
+      test<2>(4, 1, allow_artificial_cells);
+      test<2>(8, 2, allow_artificial_cells);
+      test<2>(12, 3, allow_artificial_cells);
+    }
 }

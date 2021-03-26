@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------
 //
-// Copyright (C) 2019 - 2020 by the deal.II authors
+// Copyright (C) 2019 - 2021 by the deal.II authors
 //
 // This file is part of the deal.II library.
 //
@@ -361,6 +361,7 @@ namespace hp
       const ComparisonFunction<typename identity<Number>::type> &compare_refine,
       const ComparisonFunction<typename identity<Number>::type>
         &compare_coarsen);
+
     /**
      * @}
      */
@@ -643,6 +644,54 @@ namespace hp
     template <int dim, int spacedim>
     void
     choose_p_over_h(const dealii::DoFHandler<dim, spacedim> &dof_handler);
+
+    /**
+     * @}
+     */
+
+    /**
+     * @name Optimiize p-level distribution
+     * @{
+     */
+
+    /**
+     * Limit p-level differences between neighboring cells.
+     *
+     * Essentially does to future FE indices what
+     * Triangulation::prepare_coarsening_and_refinement() does to refinement
+     * flags.
+     *
+     * In detail, this function limits the level difference of neighboring cells
+     * and thus smoothes the overall function space. Future FE indices will be
+     * raised (and never lowered) so that the level difference to neighboring
+     * cells is never larger than @p max_difference.
+     *
+     * Multiple FE hierarchies might have been registered via
+     * hp::FECollection::set_hierarchy(). This function operates on only one
+     * hierarchy, namely the one that contains the FE index @p contains_fe_index.
+     * Cells with future FE indices that are not part of the corresponding
+     * hierarchy will be ignored.
+     *
+     * The function can optionally be called before performing adaptation with
+     * Triangulation::execute_coarsening_and_refinement(). It is not necessary
+     * to call this function, nor will it be automatically invoked in any part
+     * of the library (contrary to its Triangulation counterpart).
+     *
+     * On cells that will be h-coarsened, we enforce the difference criterion as
+     * if it is already a parent cell. That means, we set the level of all
+     * siblings to the highest one among them. In that case, all sibling cells
+     * need to have the h-coarsenening flags set terminally via
+     * Triangulation::prepare_coarsening_and_refinement() beforehand. Otherwise
+     * an assertion will be triggered.
+     *
+     * Returns whether any future FE indices have been changed by this function.
+     */
+    template <int dim, int spacedim>
+    bool
+    limit_p_level_difference(
+      const dealii::DoFHandler<dim, spacedim> &dof_handler,
+      const unsigned int                       max_difference    = 1,
+      const unsigned int                       contains_fe_index = 0);
 
     /**
      * @}

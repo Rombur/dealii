@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------
 //
-// Copyright (C) 1998 - 2020 by the deal.II authors
+// Copyright (C) 1998 - 2021 by the deal.II authors
 //
 // This file is part of the deal.II library.
 //
@@ -1955,8 +1955,8 @@ namespace internal
         static unsigned int
         determine_fe_from_children(
           const typename Triangulation<dim, spacedim>::cell_iterator &,
-          const std::vector<unsigned int> &        children_fe_indices,
-          dealii::hp::FECollection<dim, spacedim> &fe_collection)
+          const std::vector<unsigned int> &              children_fe_indices,
+          const dealii::hp::FECollection<dim, spacedim> &fe_collection)
         {
           Assert(!children_fe_indices.empty(), ExcInternalError());
 
@@ -2651,108 +2651,6 @@ DoFHandler<dim, spacedim>::distribute_mg_dofs()
   if (dynamic_cast<const parallel::TriangulationBase<dim, spacedim> *>(
         &*this->tria) == nullptr)
     this->block_info_object.initialize(*this, true, false);
-}
-
-
-
-template <int dim, int spacedim>
-bool
-DoFHandler<dim, spacedim>::prepare_coarsening_and_refinement(
-  const unsigned int max_difference,
-  const unsigned int contains_fe_index) const
-{
-  Assert(max_difference > 0,
-         ExcMessage(
-           "This function does not serve any purpose for max_difference = 0."));
-  AssertIndexRange(contains_fe_index, fe_collection.size());
-
-  if (!hp_capability_enabled)
-    // nothing to do
-    return false;
-
-  // communication of future fe indices on ghost cells necessary.
-  // thus, currently only implemented for serial triangulations.
-  Assert((dynamic_cast<const parallel::TriangulationBase<dim, spacedim> *>(
-            &(*tria)) == nullptr),
-         ExcNotImplemented());
-
-  //
-  // establish hierarchy
-  //
-  // - create bimap between hierarchy levels and FE indices
-
-  // map from FE index to level in hierarchy
-  // FE indices that are not covered in the hierarchy are not in the map
-  const std::vector<unsigned int> fe_index_for_hierarchy_level =
-    fe_collection.get_hierarchy_sequence(contains_fe_index);
-
-  // map from level in hierarchy to FE index
-  // FE indices that are not covered in the hierarchy are not in the map
-  std::map<unsigned int, unsigned int> hierarchy_level_for_fe_index;
-  for (unsigned int i = 0; i < fe_index_for_hierarchy_level.size(); ++i)
-    hierarchy_level_for_fe_index[fe_index_for_hierarchy_level[i]] = i;
-
-  //
-  // limit level difference of neighboring cells
-  //
-  // - always raise levels to match criterion, never lower them
-  //   (hence iterating from highest to lowest level)
-  // - update future FE indices
-
-  bool fe_indices_changed = false;
-  bool fe_indices_changed_in_cycle;
-  do
-    {
-      fe_indices_changed_in_cycle = false;
-
-      for (const auto &cell : active_cell_iterators())
-        {
-          const auto cell_fe_and_level =
-            hierarchy_level_for_fe_index.find(cell->future_fe_index());
-
-          // ignore cells that are not part of the hierarchy
-          if (cell_fe_and_level == hierarchy_level_for_fe_index.end())
-            continue;
-
-          const unsigned int cell_level = cell_fe_and_level->second;
-
-          // ignore lowest levels of the hierarchy that always fulfill the
-          // max_difference criterion
-          if (cell_level <= max_difference)
-            continue;
-
-          for (unsigned int f = 0; f < cell->n_faces(); ++f)
-            if (cell->face(f)->at_boundary() == false)
-              {
-                const auto neighbor = cell->neighbor(f);
-
-                const auto neighbor_fe_and_level =
-                  hierarchy_level_for_fe_index.find(
-                    neighbor->future_fe_index());
-
-                // ignore neighbors that are not part of the hierarchy
-                if (neighbor_fe_and_level == hierarchy_level_for_fe_index.end())
-                  continue;
-
-                const unsigned int neighbor_level =
-                  neighbor_fe_and_level->second;
-
-                if ((cell_level - max_difference) > neighbor_level)
-                  {
-                    // update future FE index
-                    const unsigned int new_level = cell_level - max_difference;
-                    neighbor->set_future_fe_index(
-                      fe_index_for_hierarchy_level[new_level]);
-
-                    fe_indices_changed_in_cycle = true;
-                    fe_indices_changed          = true;
-                  }
-              }
-        }
-    }
-  while (fe_indices_changed_in_cycle);
-
-  return fe_indices_changed;
 }
 
 

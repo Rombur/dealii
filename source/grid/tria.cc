@@ -1249,13 +1249,13 @@ namespace internal
           tria_level.global_active_cell_indices.insert(
             tria_level.global_active_cell_indices.end(),
             total_cells - tria_level.global_active_cell_indices.size(),
-            numbers::invalid_unsigned_int);
+            numbers::invalid_dof_index);
 
           tria_level.global_level_cell_indices.reserve(total_cells);
           tria_level.global_level_cell_indices.insert(
             tria_level.global_level_cell_indices.end(),
             total_cells - tria_level.global_level_cell_indices.size(),
-            numbers::invalid_unsigned_int);
+            numbers::invalid_dof_index);
 
           if (dimension < space_dimension)
             {
@@ -2709,9 +2709,9 @@ namespace internal
           level.face_orientations.assign(size * faces_per_cell, -1);
 
         level.global_active_cell_indices.assign(size,
-                                                numbers::invalid_unsigned_int);
+                                                numbers::invalid_dof_index);
         level.global_level_cell_indices.assign(size,
-                                               numbers::invalid_unsigned_int);
+                                               numbers::invalid_dof_index);
       }
 
 
@@ -10429,9 +10429,8 @@ Triangulation<dim, spacedim>::copy_triangulation(
     faces = std::make_unique<internal::TriangulationImplementation::TriaFaces>(
       *other_tria.faces);
 
-  auto bdry_iterator = other_tria.manifold.begin();
-  for (; bdry_iterator != other_tria.manifold.end(); ++bdry_iterator)
-    manifold[bdry_iterator->first] = bdry_iterator->second->clone();
+  for (const auto &p : other_tria.manifold)
+    set_manifold(p.first, *p.second);
 
 
   levels.reserve(other_tria.levels.size());
