@@ -1000,6 +1000,8 @@ namespace internal
     };
   } // namespace DoFHandlerImplementation
 
+
+
   namespace hp
   {
     namespace DoFHandlerImplementation
@@ -1808,6 +1810,94 @@ namespace internal
 
 
         /**
+         * Same as above, but for future FE indices.
+         *
+         * Given a DoFHandler object in hp-mode, make sure that the
+         * future FE indices that a user has set for locally owned cells are
+         * communicated to all other relevant cells as well.
+         *
+         * For parallel::shared::Triangulation objects,
+         * this information is distributed on both ghost and artificial cells.
+         *
+         * In case a parallel::distributed::Triangulation is used,
+         * indices are communicated only to ghost cells.
+         */
+        template <int dim, int spacedim>
+        static void
+        communicate_future_fe_indices(DoFHandler<dim, spacedim> &dof_handler)
+        {
+          Assert(
+            dof_handler.hp_capability_enabled == true,
+            (typename DoFHandler<dim, spacedim>::ExcOnlyAvailableWithHP()));
+
+          using active_fe_index_type =
+            typename dealii::DoFHandler<dim, spacedim>::active_fe_index_type;
+
+          if (const dealii::parallel::shared::Triangulation<dim, spacedim> *tr =
+                dynamic_cast<
+                  const dealii::parallel::shared::Triangulation<dim, spacedim>
+                    *>(&dof_handler.get_triangulation()))
+            {
+              std::vector<active_fe_index_type> future_fe_indices(
+                tr->n_active_cells(), 0u);
+              for (const auto &cell : dof_handler.active_cell_iterators())
+                if (cell->is_locally_owned())
+                  future_fe_indices[cell->active_cell_index()] =
+                    dof_handler
+                      .hp_cell_future_fe_indices[cell->level()][cell->index()];
+
+              Utilities::MPI::sum(future_fe_indices,
+                                  tr->get_communicator(),
+                                  future_fe_indices);
+
+              for (const auto &cell : dof_handler.active_cell_iterators())
+                if (!cell->is_locally_owned())
+                  dof_handler
+                    .hp_cell_future_fe_indices[cell->level()][cell->index()] =
+                    future_fe_indices[cell->active_cell_index()];
+            }
+          else if (const dealii::parallel::
+                     DistributedTriangulationBase<dim, spacedim> *tr =
+                       dynamic_cast<
+                         const dealii::parallel::
+                           DistributedTriangulationBase<dim, spacedim> *>(
+                         &dof_handler.get_triangulation()))
+            {
+              auto pack =
+                [&dof_handler](
+                  const typename dealii::DoFHandler<dim, spacedim>::
+                    active_cell_iterator &cell) -> active_fe_index_type {
+                return dof_handler
+                  .hp_cell_future_fe_indices[cell->level()][cell->index()];
+              };
+
+              auto unpack =
+                [&dof_handler](
+                  const typename dealii::DoFHandler<dim, spacedim>::
+                    active_cell_iterator &   cell,
+                  const active_fe_index_type future_fe_index) -> void {
+                dof_handler
+                  .hp_cell_future_fe_indices[cell->level()][cell->index()] =
+                  future_fe_index;
+              };
+
+              GridTools::exchange_cell_data_to_ghosts<
+                active_fe_index_type,
+                dealii::DoFHandler<dim, spacedim>>(dof_handler, pack, unpack);
+            }
+          else
+            {
+              Assert(
+                (dynamic_cast<
+                   const dealii::parallel::TriangulationBase<dim, spacedim> *>(
+                   &dof_handler.get_triangulation()) == nullptr),
+                ExcInternalError());
+            }
+        }
+
+
+
+        /**
          * Collect all finite element indices on cells that will be affected by
          * future refinement and coarsening. Further, prepare those indices to
          * be distributed on on the updated triangulation later.
@@ -1871,8 +1961,10 @@ namespace internal
                                    dim>::ExcInconsistentCoarseningFlags());
 #endif
 
-                        const unsigned int fe_index =
-                          parent->dominated_future_fe_on_children();
+                        const unsigned int fe_index = dealii::internal::hp::
+                          DoFHandlerImplementation::Implementation::
+                            dominated_future_fe_on_children<dim, spacedim>(
+                              parent);
 
                         fe_transfer->coarsened_cells_fe_index.insert(
                           {parent, fe_index});
@@ -1922,11 +2014,11 @@ namespace internal
               const auto &parent = refine.first;
 
               for (const auto &child : parent->child_iterators())
-                {
-                  Assert(child->is_locally_owned() && child->is_active(),
-                         ExcInternalError());
-                  child->set_active_fe_index(refine.second);
-                }
+                if (child->is_locally_owned())
+                  {
+                    Assert(child->is_active(), ExcInternalError());
+                    child->set_active_fe_index(refine.second);
+                  }
             }
 
           // Set active FE indices on coarsened cells that have been determined
@@ -1934,9 +2026,12 @@ namespace internal
           for (const auto &coarsen : fe_transfer->coarsened_cells_fe_index)
             {
               const auto &cell = coarsen.first;
-              Assert(cell->is_locally_owned() && cell->is_active(),
-                     ExcInternalError());
-              cell->set_active_fe_index(coarsen.second);
+
+              if (cell->is_locally_owned())
+                {
+                  Assert(cell->is_active(), ExcInternalError());
+                  cell->set_active_fe_index(coarsen.second);
+                }
             }
         }
 
@@ -1969,12 +2064,96 @@ namespace internal
                                                      /*codim=*/0);
 
           Assert(dominated_fe_index != numbers::invalid_unsigned_int,
-                 (typename dealii::DoFCellAccessor<dim, spacedim, false>::
-                    ExcNoDominatedFiniteElementOnChildren()));
+                 ExcNoDominatedFiniteElementOnChildren());
 
           return dominated_fe_index;
         }
+
+
+        /**
+         * Return the index of the finite element from the entire
+         * hp::FECollection that is dominated by those assigned as future finite
+         * elements to the children of @p parent.
+         *
+         * See documentation in the header file for more information.
+         */
+        template <int dim, int spacedim>
+        static unsigned int
+        dominated_future_fe_on_children(
+          const typename DoFHandler<dim, spacedim>::cell_iterator &parent)
+        {
+          Assert(
+            !parent->is_active(),
+            ExcMessage(
+              "You ask for information on children of this cell which is only "
+              "available for active cells. This cell has no children."));
+
+          const auto &dof_handler = parent->get_dof_handler();
+          Assert(
+            dof_handler.has_hp_capabilities(),
+            (typename DoFHandler<dim, spacedim>::ExcOnlyAvailableWithHP()));
+
+          std::set<unsigned int> future_fe_indices_children;
+          for (const auto &child : parent->child_iterators())
+            {
+              Assert(
+                child->is_active(),
+                ExcMessage(
+                  "You ask for information on children of this cell which is only "
+                  "available for active cells. One of its children is not active."));
+
+              // Ghost siblings might occur on parallel::shared::Triangulation
+              // objects. The public interface does not allow to access future
+              // FE indices on ghost cells. However, we need this information
+              // here and thus call the internal function that does not check
+              // for cell ownership. This requires that future FE indices have
+              // been communicated prior to calling this function.
+              const unsigned int future_fe_index_child =
+                dealii::internal::DoFCellAccessorImplementation::
+                  Implementation::future_fe_index<dim, spacedim, false>(*child);
+
+              future_fe_indices_children.insert(future_fe_index_child);
+            }
+          Assert(!future_fe_indices_children.empty(), ExcInternalError());
+
+          const unsigned int future_fe_index =
+            dof_handler.fe_collection.find_dominated_fe_extended(
+              future_fe_indices_children,
+              /*codim=*/0);
+
+          Assert(future_fe_index != numbers::invalid_unsigned_int,
+                 ExcNoDominatedFiniteElementOnChildren());
+
+          return future_fe_index;
+        }
       };
+
+
+
+      /**
+       * Public wrapper of Implementation::communicate_future_fe_indices().
+       */
+      template <int dim, int spacedim>
+      void
+      communicate_future_fe_indices(DoFHandler<dim, spacedim> &dof_handler)
+      {
+        Implementation::communicate_future_fe_indices<dim, spacedim>(
+          dof_handler);
+      }
+
+
+
+      /**
+       * Public wrapper of Implementation::dominated_future_fe_on_children().
+       */
+      template <int dim, int spacedim>
+      unsigned int
+      dominated_future_fe_on_children(
+        const typename DoFHandler<dim, spacedim>::cell_iterator &parent)
+      {
+        return Implementation::dominated_future_fe_on_children<dim, spacedim>(
+          parent);
+      }
     } // namespace DoFHandlerImplementation
   }   // namespace hp
 } // namespace internal
@@ -3093,6 +3272,11 @@ DoFHandler<dim, spacedim>::connect_to_triangulation_signals()
         }));
 
       // refinement signals
+      this->tria_listeners_for_transfer.push_back(
+        this->tria->signals.pre_refinement.connect([this]() {
+          internal::hp::DoFHandlerImplementation::Implementation::
+            communicate_future_fe_indices(*this);
+        }));
       this->tria_listeners_for_transfer.push_back(
         this->tria->signals.pre_refinement.connect(
           [this] { this->pre_transfer_action(); }));

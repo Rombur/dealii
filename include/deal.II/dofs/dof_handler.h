@@ -535,7 +535,7 @@ public:
 
   /**
    * Invalid active FE index which will be used as a default value to determine
-   *  whether a future FE index has been set or not.
+   * whether a future FE index has been set or not.
    */
   static const active_fe_index_type invalid_active_fe_index =
     static_cast<active_fe_index_type>(-1);
@@ -1245,18 +1245,15 @@ public:
                            locally_owned_mg_dofs_per_processor(const unsigned int level) const;
 
   /**
-   * Return a constant reference to the selected finite element object.
-   * Since there is only one FiniteElement @p index must be equal to zero
-   * which is also the default value.
+   * Return a constant reference to the indexth finite element object that is
+   * used by this object.
    */
   const FiniteElement<dim, spacedim> &
   get_fe(const unsigned int index = 0) const;
 
   /**
    * Return a constant reference to the set of finite element objects that
-   * are used by this @p DoFHandler. Since this object only contains one
-   * FiniteElement, only this one object is returned wrapped in a
-   * hp::FECollection.
+   * are used by this object.
    */
   const hp::FECollection<dim, spacedim> &
   get_fe_collection() const;
@@ -1816,6 +1813,67 @@ private:
                 "equal to the space dimension <spacedim> in which it lives.");
 #endif
 };
+
+namespace internal
+{
+  namespace hp
+  {
+    namespace DoFHandlerImplementation
+    {
+      /**
+       * Given a DoFHandler object in hp-mode, make sure that the
+       * future FE indices that a user has set for locally owned cells are
+       * communicated to all other relevant cells as well.
+       *
+       * For parallel::shared::Triangulation objects,
+       * this information is distributed on both ghost and artificial cells.
+       *
+       * In case a parallel::distributed::Triangulation is used,
+       * indices are communicated only to ghost cells.
+       */
+      template <int dim, int spacedim>
+      void
+      communicate_future_fe_indices(DoFHandler<dim, spacedim> &dof_handler);
+
+      /**
+       * Return the index of the finite element from the entire hp::FECollection
+       * that is dominated by those assigned as future finite elements to the
+       * children of @p parent.
+       *
+       * We find the corresponding finite element among the future finite
+       * elements on the children of this cell. If none of them qualify, we
+       * extend our search on the whole hp::FECollection, which is the element
+       * that describes the smallest finite element space that includes all
+       * future finite elements assigned to the children. If the function is not
+       * able to find a finite element at all, an assertion will be triggered.
+       *
+       * In this way, we determine the finite element of the parent cell in case
+       * of h-coarsening in the hp-context.
+       *
+       * @note This function can only be called on direct parent cells, i.e.,
+       * non-active cells whose children are all active.
+       *
+       * @note On parallel::shared::Triangulation objects where sibling cells
+       * can be ghost cells, make sure that future FE indices have been properly
+       * communicated with communicate_future_fe_indices() first. Otherwise,
+       * results might differ on different processors. There is no check for
+       * consistency of future FE indices.
+       */
+      template <int dim, int spacedim = dim>
+      unsigned int
+      dominated_future_fe_on_children(
+        const typename DoFHandler<dim, spacedim>::cell_iterator &parent);
+
+      /**
+       * Exception
+       */
+      DeclExceptionMsg(
+        ExcNoDominatedFiniteElementOnChildren,
+        "No FiniteElement has been found in your FECollection that is "
+        "dominated by all children of a cell you are trying to coarsen!");
+    } // namespace DoFHandlerImplementation
+  }   // namespace hp
+} // namespace internal
 
 #ifndef DOXYGEN
 
