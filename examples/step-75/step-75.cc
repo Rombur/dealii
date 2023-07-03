@@ -64,10 +64,6 @@
 #include <fstream>
 #include <iostream>
 
-// For load balancing we will assign individual weights on cells, and for that
-// we will use the class parallel::CellWeights.
-#include <deal.II/distributed/cell_weights.h>
-
 // The solution function requires a transformation from Cartesian to polar
 // coordinates. The GeometricUtilities::Coordinates namespace provides the
 // necessary tools.
@@ -211,17 +207,17 @@ namespace Step75
 
     LaplaceOperator() = default;
 
-    LaplaceOperator(const hp::MappingCollection<dim> &mapping,
-                    const DoFHandler<dim> &           dof_handler,
-                    const hp::QCollection<dim> &      quad,
-                    const AffineConstraints<number> & constraints,
-                    VectorType &                      system_rhs);
+    LaplaceOperator(const MappingQ1<dim> &           mapping,
+                    const DoFHandler<dim> &          dof_handler,
+                    const QGauss<dim> &              quad,
+                    const AffineConstraints<number> &constraints,
+                    VectorType &                     system_rhs);
 
-    void reinit(const hp::MappingCollection<dim> &mapping,
-                const DoFHandler<dim> &           dof_handler,
-                const hp::QCollection<dim> &      quad,
-                const AffineConstraints<number> & constraints,
-                VectorType &                      system_rhs);
+    void reinit(const MappingQ1<dim> &           mapping,
+                const DoFHandler<dim> &          dof_handler,
+                const QGauss<dim> &              quad,
+                const AffineConstraints<number> &constraints,
+                VectorType &                     system_rhs);
 
     types::global_dof_index m() const;
 
@@ -273,11 +269,11 @@ namespace Step75
   // right-hand-side vector.
   template <int dim, typename number>
   LaplaceOperator<dim, number>::LaplaceOperator(
-    const hp::MappingCollection<dim> &mapping,
-    const DoFHandler<dim> &           dof_handler,
-    const hp::QCollection<dim> &      quad,
-    const AffineConstraints<number> & constraints,
-    VectorType &                      system_rhs)
+    const MappingQ1<dim> &           mapping,
+    const DoFHandler<dim> &          dof_handler,
+    const QGauss<dim> &              quad,
+    const AffineConstraints<number> &constraints,
+    VectorType &                     system_rhs)
   {
     this->reinit(mapping, dof_handler, quad, constraints, system_rhs);
   }
@@ -286,11 +282,11 @@ namespace Step75
 
   template <int dim, typename number>
   void LaplaceOperator<dim, number>::reinit(
-    const hp::MappingCollection<dim> &mapping,
-    const DoFHandler<dim> &           dof_handler,
-    const hp::QCollection<dim> &      quad,
-    const AffineConstraints<number> & constraints,
-    VectorType &                      system_rhs)
+    const MappingQ1<dim> &           mapping,
+    const DoFHandler<dim> &          dof_handler,
+    const QGauss<dim> &              quad,
+    const AffineConstraints<number> &constraints,
+    VectorType &                     system_rhs)
   {
     // Clear internal data structures (in the case that the operator is reused).
     this->system_matrix.clear();
@@ -628,14 +624,14 @@ namespace Step75
   // particular the operators, and the transfer operator as a
   // MGTransferGlobalCoarsening object.
   template <typename VectorType, typename OperatorType, int dim>
-  void solve_with_gmg(SolverControl &                  solver_control,
-                      const OperatorType &             system_matrix,
-                      VectorType &                     dst,
-                      const VectorType &               src,
-                      const MultigridParameters &      mg_data,
-                      const hp::MappingCollection<dim> mapping_collection,
-                      const DoFHandler<dim> &          dof_handler,
-                      const hp::QCollection<dim> &     quadrature_collection)
+  void solve_with_gmg(SolverControl &            solver_control,
+                      const OperatorType &       system_matrix,
+                      VectorType &               dst,
+                      const VectorType &         src,
+                      const MultigridParameters &mg_data,
+                      const MappingQ1<dim>       mapping,
+                      const DoFHandler<dim> &    dof_handler,
+                      const QGauss<dim> &        quadrature)
   {
     // Create a DoFHandler and operator for each multigrid level,
     // as well as, create transfer operators. To be able to
@@ -660,18 +656,6 @@ namespace Step75
     // allocate sufficient memory for all levels.
     const unsigned int n_h_levels = coarse_grid_triangulations.size();
 
-    const auto get_max_active_fe_degree = [&](const auto &dof_handler) {
-      unsigned int max = 0;
-
-      for (auto &cell : dof_handler.active_cell_iterators())
-        if (cell->is_locally_owned())
-          max =
-            std::max(max, dof_handler.get_fe(cell->active_fe_index()).degree);
-
-      return Utilities::MPI::max(max, MPI_COMM_WORLD);
-    };
-
-
     unsigned int minlevel = 0;
     unsigned int maxlevel = n_h_levels - 1;
 
@@ -685,7 +669,7 @@ namespace Step75
     for (unsigned int l = 0; l < n_h_levels; ++l)
       {
         dof_handlers[l].reinit(*coarse_grid_triangulations[l]);
-        dof_handlers[l].distribute_dofs(dof_handler.get_fe_collection());
+        dof_handlers[l].distribute_dofs(dof_handler.get_fe());
       }
 
 
@@ -706,20 +690,14 @@ namespace Step75
         constraint.reinit(locally_relevant_dofs);
 
         DoFTools::make_hanging_node_constraints(dof_handler, constraint);
-        VectorTools::interpolate_boundary_values(mapping_collection,
-                                                 dof_handler,
-                                                 0,
-                                                 Functions::ZeroFunction<dim>(),
-                                                 constraint);
+        VectorTools::interpolate_boundary_values(
+          mapping, dof_handler, 0, Functions::ZeroFunction<dim>(), constraint);
         constraint.close();
 
         VectorType dummy;
 
-        operators[level] = std::make_unique<OperatorType>(mapping_collection,
-                                                          dof_handler,
-                                                          quadrature_collection,
-                                                          constraint,
-                                                          dummy);
+        operators[level] = std::make_unique<OperatorType>(
+          mapping, dof_handler, quadrature, constraint, dummy);
       }
 
     // Set up intergrid operators and collect transfer operators within a single
@@ -783,10 +761,10 @@ namespace Step75
     parallel::distributed::Triangulation<dim> triangulation;
     DoFHandler<dim>                           dof_handler;
 
-    hp::MappingCollection<dim> mapping_collection;
-    hp::FECollection<dim>      fe_collection;
-    hp::QCollection<dim>       quadrature_collection;
-    hp::QCollection<dim - 1>   face_quadrature_collection;
+    MappingQ1<dim>  mapping;
+    FE_Q<dim>       fe;
+    QGauss<dim>     quadrature;
+    QGauss<dim - 1> face_quadrature;
 
     IndexSet locally_owned_dofs;
     IndexSet locally_relevant_dofs;
@@ -796,8 +774,6 @@ namespace Step75
     LaplaceOperator<dim, double>               laplace_operator;
     LinearAlgebra::distributed::Vector<double> locally_relevant_solution;
     LinearAlgebra::distributed::Vector<double> system_rhs;
-
-    std::unique_ptr<parallel::CellWeights<dim>> cell_weights;
 
     Vector<float> estimated_error_per_cell;
 
@@ -821,6 +797,9 @@ namespace Step75
     , prm(parameters)
     , triangulation(mpi_communicator)
     , dof_handler(triangulation)
+    , fe(prm.max_p_degree)
+    , quadrature(prm.max_p_degree + 1)
+    , face_quadrature(prm.max_p_degree + 1)
     , pcout(std::cout,
             (Utilities::MPI::this_mpi_process(mpi_communicator) == 0))
     , computing_timer(mpi_communicator,
@@ -833,81 +812,6 @@ namespace Step75
              "Triangulation level limits have been incorrectly set up."));
     Assert(prm.min_p_degree <= prm.max_p_degree,
            ExcMessage("FECollection degrees have been incorrectly set up."));
-
-    // We need to prepare the data structures for the hp-functionality in the
-    // actual body of the constructor, and create corresponding objects for
-    // every degree in the specified range from the parameter struct. As we are
-    // only dealing with non-distorted rectangular cells, a linear mapping
-    // object is sufficient in this context.
-    //
-    // In the Parameters struct, we provide ranges for levels on which the
-    // function space is operating with a reasonable resolution. The multigrid
-    // algorithm requires linear elements on the coarsest possible level. So we
-    // start with the lowest polynomial degree and fill the collection with
-    // consecutively higher degrees until the user-specified maximum is
-    // reached.
-    mapping_collection.push_back(MappingQ1<dim>());
-
-    for (unsigned int degree = prm.min_p_degree; degree <= prm.max_p_degree;
-         ++degree)
-      {
-        fe_collection.push_back(FE_Q<dim>(degree));
-        quadrature_collection.push_back(QGauss<dim>(degree + 1));
-        face_quadrature_collection.push_back(QGauss<dim - 1>(degree + 1));
-      }
-
-    // As our FECollection contains more finite elements than we want to use for
-    // the finite element approximation of our solution, we would like to limit
-    // the range on which active FE indices can operate on. For this, the
-    // FECollection class allows to register a hierarchy that determines the
-    // succeeding and preceding finite element in case of of p-refinement and
-    // p-coarsening, respectively. All functions in the hp::Refinement namespace
-    // consult this hierarchy to determine future FE indices. We will register
-    // such a hierarchy that only works on finite elements with polynomial
-    // degrees in the proposed range <code>[min_p_degree, max_p_degree]</code>.
-    const unsigned int min_fe_index = prm.min_p_degree - 1;
-    fe_collection.set_hierarchy(
-      /*next_index=*/
-      [](const typename hp::FECollection<dim> &fe_collection,
-         const unsigned int                    fe_index) -> unsigned int {
-        return ((fe_index + 1) < fe_collection.size()) ? fe_index + 1 :
-                                                         fe_index;
-      },
-      /*previous_index=*/
-      [min_fe_index](const typename hp::FECollection<dim> &,
-                     const unsigned int fe_index) -> unsigned int {
-        Assert(fe_index >= min_fe_index,
-               ExcMessage("Finite element is not part of hierarchy!"));
-        return (fe_index > min_fe_index) ? fe_index - 1 : fe_index;
-      });
-
-    // The next part is going to be tricky. During execution of refinement, a
-    // few hp-algorithms need to interfere with the actual refinement process on
-    // the Triangulation object. We do this by connecting several functions to
-    // Triangulation::Signals: signals will be called at different stages during
-    // the actual refinement process and trigger all connected functions. We
-    // require this functionality for load balancing and to limit the polynomial
-    // degrees of neighboring cells.
-    //
-    // For the former, we would like to assign a weight to every cell that is
-    // proportional to the number of degrees of freedom of its future finite
-    // element. The library offers a class parallel::CellWeights that allows to
-    // easily attach individual weights at the right place during the refinement
-    // process, i.e., after all refine and coarsen flags have been set correctly
-    // for hp-adaptation and right before repartitioning for load balancing is
-    // about to happen. Functions can be registered that will attach weights in
-    // the form that $a (n_\text{dofs})^b$ with a provided pair of parameters
-    // $(a,b)$. We register such a function in the following.
-    //
-    // For load balancing, efficient solvers like the one we use should scale
-    // linearly with the number of degrees of freedom owned. We set the
-    // parameters for cell weighting correspondingly: A weighting factor of $1$
-    // and an exponent of $1$ (see the definitions of the `weighting_factor` and
-    // `weighting_exponent` above).
-    cell_weights = std::make_unique<parallel::CellWeights<dim>>(
-      dof_handler,
-      parallel::CellWeights<dim>::ndofs_weighting(
-        {prm.weighting_factor, prm.weighting_exponent}));
   }
 
 
@@ -967,7 +871,7 @@ namespace Step75
     GridGenerator::subdivided_hyper_L(
       triangulation, repetitions, bottom_left, top_right, cells_to_remove);
 
-    dof_handler.distribute_dofs(fe_collection);
+    dof_handler.distribute_dofs(fe);
 
     triangulation.refine_global(prm.min_h_level);
   }
@@ -986,7 +890,7 @@ namespace Step75
   {
     TimerOutput::Scope t(computing_timer, "setup system");
 
-    dof_handler.distribute_dofs(fe_collection);
+    dof_handler.distribute_dofs(fe);
 
     locally_owned_dofs = dof_handler.locally_owned_dofs();
     locally_relevant_dofs =
@@ -1001,14 +905,11 @@ namespace Step75
     constraints.reinit(locally_relevant_dofs);
     DoFTools::make_hanging_node_constraints(dof_handler, constraints);
     VectorTools::interpolate_boundary_values(
-      mapping_collection, dof_handler, 0, Solution<dim>(), constraints);
+      mapping, dof_handler, 0, Solution<dim>(), constraints);
     constraints.close();
 
-    laplace_operator.reinit(mapping_collection,
-                            dof_handler,
-                            quadrature_collection,
-                            constraints,
-                            system_rhs);
+    laplace_operator.reinit(
+      mapping, dof_handler, quadrature, constraints, system_rhs);
   }
 
 
@@ -1082,21 +983,6 @@ namespace Step75
         pcout << " ...";
       pcout << std::endl;
     }
-
-    {
-      std::vector<unsigned int> n_fe_indices(fe_collection.size(), 0);
-      for (const auto &cell : dof_handler.active_cell_iterators())
-        if (cell->is_locally_owned())
-          n_fe_indices[cell->active_fe_index()]++;
-
-      Utilities::MPI::sum(n_fe_indices, mpi_communicator, n_fe_indices);
-
-      pcout << "   Frequencies of poly. degrees:";
-      for (unsigned int i = 0; i < fe_collection.size(); ++i)
-        if (n_fe_indices[i] > 0)
-          pcout << ' ' << fe_collection[i].degree << ':' << n_fe_indices[i];
-      pcout << std::endl;
-    }
   }
 
 
@@ -1123,9 +1009,9 @@ namespace Step75
                    completely_distributed_solution,
                    system_rhs,
                    prm.mg_data,
-                   mapping_collection,
+                   mapping,
                    dof_handler,
-                   quadrature_collection);
+                   quadrature);
 
     pcout << "   Solved in " << solver_control.last_step() << " iterations."
           << std::endl;
@@ -1168,7 +1054,7 @@ namespace Step75
     estimated_error_per_cell.grow_or_shrink(triangulation.n_active_cells());
     KellyErrorEstimator<dim>::estimate(
       dof_handler,
-      face_quadrature_collection,
+      face_quadrature,
       std::map<types::boundary_id, const Function<dim> *>(),
       locally_relevant_solution,
       estimated_error_per_cell,
@@ -1273,7 +1159,7 @@ namespace Step75
     data_out.add_data_vector(fe_degrees, "fe_degree");
     data_out.add_data_vector(subdomain, "subdomain");
     data_out.add_data_vector(estimated_error_per_cell, "error");
-    data_out.build_patches(mapping_collection);
+    data_out.build_patches(mapping);
 
     data_out.write_vtu_with_pvtu_record(
       "./", "solution", cycle, mpi_communicator, 2, 1);
