@@ -156,14 +156,6 @@ namespace Step75
       unsigned int degree              = 5;
       unsigned int eig_cg_n_iterations = 20;
     } smoother;
-
-    struct
-    {
-      MGTransferGlobalCoarseningTools::PolynomialCoarseningSequenceType
-        p_sequence = MGTransferGlobalCoarseningTools::
-          PolynomialCoarseningSequenceType::decrease_by_one;
-      bool perform_h_transfer = true;
-    } transfer;
   };
 
 
@@ -181,16 +173,13 @@ namespace Step75
 
     MultigridParameters mg_data;
 
-    unsigned int min_h_level            = 5;
-    unsigned int max_h_level            = 12;
-    unsigned int min_p_degree           = 2;
-    unsigned int max_p_degree           = 6;
-    unsigned int max_p_level_difference = 1;
+    unsigned int min_h_level  = 5;
+    unsigned int max_h_level  = 12;
+    unsigned int min_p_degree = 2;
+    unsigned int max_p_degree = 2;
 
-    double refine_fraction    = 0.3;
-    double coarsen_fraction   = 0.03;
-    double p_refine_fraction  = 0.9;
-    double p_coarsen_fraction = 0.9;
+    double refine_fraction  = 0.3;
+    double coarsen_fraction = 0.03;
 
     double weighting_factor   = 1.;
     double weighting_exponent = 1.;
@@ -663,18 +652,13 @@ namespace Step75
     MGLevelObject<MGTwoLevelTransfer<dim, VectorType>> transfers;
 
     std::vector<std::shared_ptr<const Triangulation<dim>>>
-      coarse_grid_triangulations;
-    if (mg_data.transfer.perform_h_transfer)
       coarse_grid_triangulations =
         MGTransferGlobalCoarseningTools::create_geometric_coarsening_sequence(
           dof_handler.get_triangulation());
-    else
-      coarse_grid_triangulations.emplace_back(
-        &(dof_handler.get_triangulation()), [](auto *) {});
 
     // Determine the total number of levels for the multigrid operation and
     // allocate sufficient memory for all levels.
-    const unsigned int n_h_levels = coarse_grid_triangulations.size() - 1;
+    const unsigned int n_h_levels = coarse_grid_triangulations.size();
 
     const auto get_max_active_fe_degree = [&](const auto &dof_handler) {
       unsigned int max = 0;
@@ -687,22 +671,9 @@ namespace Step75
       return Utilities::MPI::max(max, MPI_COMM_WORLD);
     };
 
-    const unsigned int n_p_levels =
-      MGTransferGlobalCoarseningTools::create_polynomial_coarsening_sequence(
-        get_max_active_fe_degree(dof_handler), mg_data.transfer.p_sequence)
-        .size();
-
-    std::map<unsigned int, unsigned int> fe_index_for_degree;
-    for (unsigned int i = 0; i < dof_handler.get_fe_collection().size(); ++i)
-      {
-        const unsigned int degree = dof_handler.get_fe(i).degree;
-        Assert(fe_index_for_degree.find(degree) == fe_index_for_degree.end(),
-               ExcMessage("FECollection does not contain unique degrees."));
-        fe_index_for_degree[degree] = i;
-      }
 
     unsigned int minlevel = 0;
-    unsigned int maxlevel = n_h_levels + n_p_levels - 1;
+    unsigned int maxlevel = n_h_levels - 1;
 
     dof_handlers.resize(minlevel, maxlevel);
     operators.resize(minlevel, maxlevel);
@@ -717,54 +688,6 @@ namespace Step75
         dof_handlers[l].distribute_dofs(dof_handler.get_fe_collection());
       }
 
-    // After we reached the finest mesh, we will adjust the polynomial degrees
-    // on each level. We reverse iterate over our data structure and start at
-    // the finest mesh that contains all information about the active FE
-    // indices. We then lower the polynomial degree of each cell level by level.
-    for (unsigned int i = 0, l = maxlevel; i < n_p_levels; ++i, --l)
-      {
-        dof_handlers[l].reinit(dof_handler.get_triangulation());
-
-        if (l == maxlevel) // finest level
-          {
-            auto &dof_handler_mg = dof_handlers[l];
-
-            auto cell_other = dof_handler.begin_active();
-            for (auto &cell : dof_handler_mg.active_cell_iterators())
-              {
-                if (cell->is_locally_owned())
-                  cell->set_active_fe_index(cell_other->active_fe_index());
-                cell_other++;
-              }
-          }
-        else // coarse level
-          {
-            auto &dof_handler_fine   = dof_handlers[l + 1];
-            auto &dof_handler_coarse = dof_handlers[l + 0];
-
-            auto cell_other = dof_handler_fine.begin_active();
-            for (auto &cell : dof_handler_coarse.active_cell_iterators())
-              {
-                if (cell->is_locally_owned())
-                  {
-                    const unsigned int next_degree =
-                      MGTransferGlobalCoarseningTools::
-                        create_next_polynomial_coarsening_degree(
-                          cell_other->get_fe().degree,
-                          mg_data.transfer.p_sequence);
-                    Assert(fe_index_for_degree.find(next_degree) !=
-                             fe_index_for_degree.end(),
-                           ExcMessage("Next polynomial degree in sequence "
-                                      "does not exist in FECollection."));
-
-                    cell->set_active_fe_index(fe_index_for_degree[next_degree]);
-                  }
-                cell_other++;
-              }
-          }
-
-        dof_handlers[l].distribute_dofs(dof_handler.get_fe_collection());
-      }
 
     // Next, we will create all data structures additionally needed on each
     // multigrid level. This involves determining constraints with homogeneous
@@ -874,11 +797,9 @@ namespace Step75
     LinearAlgebra::distributed::Vector<double> locally_relevant_solution;
     LinearAlgebra::distributed::Vector<double> system_rhs;
 
-    std::unique_ptr<FESeries::Legendre<dim>>    legendre;
     std::unique_ptr<parallel::CellWeights<dim>> cell_weights;
 
     Vector<float> estimated_error_per_cell;
-    Vector<float> hp_decision_indicators;
 
     ConditionalOStream pcout;
     TimerOutput        computing_timer;
@@ -927,7 +848,8 @@ namespace Step75
     // reached.
     mapping_collection.push_back(MappingQ1<dim>());
 
-    for (unsigned int degree = 1; degree <= prm.max_p_degree; ++degree)
+    for (unsigned int degree = prm.min_p_degree; degree <= prm.max_p_degree;
+         ++degree)
       {
         fe_collection.push_back(FE_Q<dim>(degree));
         quadrature_collection.push_back(QGauss<dim>(degree + 1));
@@ -959,11 +881,6 @@ namespace Step75
         return (fe_index > min_fe_index) ? fe_index - 1 : fe_index;
       });
 
-    // We initialize the FESeries::Legendre object in the default configuration
-    // for smoothness estimation.
-    legendre = std::make_unique<FESeries::Legendre<dim>>(
-      SmoothnessEstimator::Legendre::default_fe_series(fe_collection));
-
     // The next part is going to be tricky. During execution of refinement, a
     // few hp-algorithms need to interfere with the actual refinement process on
     // the Triangulation object. We do this by connecting several functions to
@@ -991,36 +908,6 @@ namespace Step75
       dof_handler,
       parallel::CellWeights<dim>::ndofs_weighting(
         {prm.weighting_factor, prm.weighting_exponent}));
-
-    // In h-adaptive applications, we ensure a 2:1 mesh balance by limiting the
-    // difference of refinement levels of neighboring cells to one. With the
-    // second call in the following code snippet, we will ensure the same for
-    // p-levels on neighboring cells: levels of future finite elements are not
-    // allowed to differ by more than a specified difference. The function
-    // hp::Refinement::limit_p_level_difference takes care of this, but needs to
-    // be connected to a very specific signal in the parallel context. The issue
-    // is that we need to know how the mesh will be actually refined to set
-    // future FE indices accordingly. As we ask the p4est oracle to perform
-    // refinement, we need to ensure that the Triangulation has been updated
-    // with the adaptation flags of the oracle first. An instantiation of
-    // parallel::distributed::TemporarilyMatchRefineFlags does exactly
-    // that for the duration of its life. Thus, we will create an object of this
-    // class right before limiting the p-level difference, and connect the
-    // corresponding lambda function to the signal
-    // Triangulation::Signals::post_p4est_refinement, which will be triggered
-    // after the oracle got refined, but before the Triangulation is refined.
-    // Furthermore, we specify that this function will be connected to the front
-    // of the signal, to ensure that the modification is performed before any
-    // other function connected to the same signal.
-    triangulation.signals.post_p4est_refinement.connect(
-      [&, min_fe_index]() {
-        const parallel::distributed::TemporarilyMatchRefineFlags<dim>
-          refine_modifier(triangulation);
-        hp::Refinement::limit_p_level_difference(dof_handler,
-                                                 prm.max_p_level_difference,
-                                                 /*contains=*/min_fe_index);
-      },
-      boost::signals2::at_front);
   }
 
 
@@ -1079,11 +966,6 @@ namespace Step75
 
     GridGenerator::subdivided_hyper_L(
       triangulation, repetitions, bottom_left, top_right, cells_to_remove);
-
-    const unsigned int min_fe_index = prm.min_p_degree - 1;
-    for (const auto &cell : dof_handler.active_cell_iterators())
-      if (cell->is_locally_owned())
-        cell->set_active_fe_index(min_fe_index);
 
     dof_handler.distribute_dofs(fe_collection);
 
@@ -1297,12 +1179,6 @@ namespace Step75
       /*material_id=*/numbers::invalid_material_id,
       /*strategy=*/
       KellyErrorEstimator<dim>::Strategy::face_diameter_over_twice_max_degree);
-
-    hp_decision_indicators.grow_or_shrink(triangulation.n_active_cells());
-    SmoothnessEstimator::Legendre::coefficient_decay(*legendre,
-                                                     dof_handler,
-                                                     locally_relevant_solution,
-                                                     hp_decision_indicators);
   }
 
 
@@ -1331,26 +1207,6 @@ namespace Step75
       prm.refine_fraction,
       prm.coarsen_fraction);
 
-    // Next, we will make all adjustments for hp-adaptation. We want to refine
-    // and coarsen those cells flagged in the previous step, but need to decide
-    // if we would like to do it by adjusting the grid resolution or the
-    // polynomial degree.
-    //
-    // The next function call sets future FE indices according to the previously
-    // calculated smoothness indicators as p-adaptation indicators. These
-    // indices will only be set on those cells that have refine or coarsen flags
-    // assigned.
-    //
-    // For the p-adaptation fractions, we will take an educated guess. Since we
-    // only expect a single singularity in our scenario, i.e., in the origin of
-    // the domain, and a smooth solution anywhere else, we would like to
-    // strongly prefer to use p-adaptation over h-adaptation. This reflects in
-    // our choice of a fraction of 90% for both p-refinement and p-coarsening.
-    hp::Refinement::p_adaptivity_fixed_number(dof_handler,
-                                              hp_decision_indicators,
-                                              prm.p_refine_fraction,
-                                              prm.p_coarsen_fraction);
-
     // After setting all indicators, we will remove those that exceed the
     // specified limits of the provided level ranges in the Parameters struct.
     // This limitation naturally arises for p-adaptation as the number of
@@ -1374,18 +1230,6 @@ namespace Step75
     for (const auto &cell :
          triangulation.active_cell_iterators_on_level(prm.min_h_level))
       cell->clear_coarsen_flag();
-
-    // At this stage, we have both the future FE indices and the classic refine
-    // and coarsen flags set. The latter will be interpreted by
-    // Triangulation::execute_coarsening_and_refinement() for h-adaptation, and
-    // our previous modification ensures that the resulting Triangulation stays
-    // within the specified level range.
-    //
-    // Now, we would like to only impose one type of adaptation on cells, which
-    // is what the next function will sort out for us. In short, on cells which
-    // have both types of indicators assigned, we will favor the p-adaptation
-    // one and remove the h-adaptation one.
-    hp::Refinement::choose_p_over_h(dof_handler);
 
     // In the end, we are left to execute coarsening and refinement. Here, not
     // only the grid will be updated, but also all previous future FE indices
@@ -1429,7 +1273,6 @@ namespace Step75
     data_out.add_data_vector(fe_degrees, "fe_degree");
     data_out.add_data_vector(subdomain, "subdomain");
     data_out.add_data_vector(estimated_error_per_cell, "error");
-    data_out.add_data_vector(hp_decision_indicators, "hp_indicator");
     data_out.build_patches(mapping_collection);
 
     data_out.write_vtu_with_pvtu_record(
@@ -1453,12 +1296,6 @@ namespace Step75
     pcout << "Running with Trilinos on "
           << Utilities::MPI::n_mpi_processes(mpi_communicator)
           << " MPI rank(s)..." << std::endl;
-
-    {
-      pcout << "Calculating transformation matrices..." << std::endl;
-      TimerOutput::Scope t(computing_timer, "calculate transformation");
-      legendre->precalculate_all_transformation_matrices();
-    }
 
     for (unsigned int cycle = 0; cycle < prm.n_cycles; ++cycle)
       {
