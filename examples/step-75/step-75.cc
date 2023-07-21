@@ -74,6 +74,8 @@
 #include <deal.II/matrix_free/matrix_free.h>
 #include <deal.II/matrix_free/fe_evaluation.h>
 #include <deal.II/matrix_free/tools.h>
+#include <deal.II/matrix_free/cuda_matrix_free.h>
+#include <deal.II/matrix_free/cuda_fe_evaluation.h>
 
 // We will use LinearAlgebra::distributed::Vector for linear algebra operations.
 #include <deal.II/lac/la_parallel_vector.h>
@@ -90,6 +92,81 @@
 namespace Step75
 {
   using namespace dealii;
+  constexpr unsigned int p_degree = 2;
+
+  template <int dim, int fe_degree>
+  class QuadratureOperator
+  {
+  public:
+    DEAL_II_HOST_DEVICE QuadratureOperator(
+      const typename CUDAWrappers::MatrixFree<dim, double>::Data *gpu_data,
+      int                                                         cell)
+    {}
+
+    DEAL_II_HOST_DEVICE void operator()(
+      CUDAWrappers::FEEvaluation<dim, fe_degree, fe_degree + 1, 1, double>
+        *       fe_eval,
+      const int q_point) const;
+
+    static const unsigned int n_q_points = Utilities::pow(fe_degree + 1, dim);
+
+  private:
+    const typename CUDAWrappers::MatrixFree<dim, double>::Data *gpu_data;
+    int                                                         cell;
+  };
+
+
+
+  template <int dim, int fe_degree>
+  DEAL_II_HOST_DEVICE void QuadratureOperator<dim, fe_degree>::operator()(
+    CUDAWrappers::FEEvaluation<dim, fe_degree, fe_degree + 1, 1, double>
+      *       fe_eval,
+    const int q_point) const
+  {
+    fe_eval->submit_gradient(fe_eval->get_gradient(q_point), q_point);
+  }
+
+
+
+  template <int dim, int fe_degree>
+  class LocalOperator
+  {
+  public:
+    static constexpr unsigned int n_dofs_1 = fe_degree + 1;
+    static constexpr unsigned int n_local_dofs =
+      Utilities::pow(fe_degree + 1, dim);
+    static constexpr unsigned int n_q_points =
+      Utilities::pow(fe_degree + 1, dim);
+
+    DEAL_II_HOST_DEVICE void operator()(
+      const unsigned int                                          cell,
+      const typename CUDAWrappers::MatrixFree<dim, double>::Data *gpu_data,
+      CUDAWrappers::SharedData<dim, double> *                     shared_data,
+      const double *                                              src,
+      double *                                                    dst) const;
+  };
+
+
+
+  template <int dim, int fe_degree>
+  DEAL_II_HOST_DEVICE void LocalOperator<dim, fe_degree>::operator()(
+    const unsigned int                                          cell,
+    const typename CUDAWrappers::MatrixFree<dim, double>::Data *gpu_data,
+    CUDAWrappers::SharedData<dim, double> *                     shared_data,
+    const double *                                              src,
+    double *                                                    dst) const
+  {
+    CUDAWrappers::FEEvaluation<dim, fe_degree, fe_degree + 1, 1, double>
+      fe_eval(gpu_data, shared_data);
+    fe_eval.read_dof_values(src);
+    fe_eval.evaluate(false, true);
+    fe_eval.apply_for_each_quad_point(
+      QuadratureOperator<dim, fe_degree>(gpu_data, cell));
+    fe_eval.integrate(false, true);
+    fe_eval.distribute_local_to_global(dst);
+  }
+
+
 
   // @sect3{The <code>Solution</code> class template}
 
@@ -169,10 +246,8 @@ namespace Step75
 
     MultigridParameters mg_data;
 
-    unsigned int min_h_level  = 5;
-    unsigned int max_h_level  = 12;
-    unsigned int min_p_degree = 2;
-    unsigned int max_p_degree = 2;
+    unsigned int min_h_level = 5;
+    unsigned int max_h_level = 12;
 
     double refine_fraction  = 0.3;
     double coarsen_fraction = 0.03;
@@ -201,7 +276,10 @@ namespace Step75
   class LaplaceOperator : public Subscriptor
   {
   public:
-    using VectorType = LinearAlgebra::distributed::Vector<number>;
+    using VectorType =
+      LinearAlgebra::distributed::Vector<number, MemorySpace::Default>;
+    using VectorTypeHost =
+      LinearAlgebra::distributed::Vector<number, MemorySpace::Host>;
 
     using FECellIntegrator = FEEvaluation<dim, -1, 0, 1, number>;
 
@@ -209,13 +287,13 @@ namespace Step75
 
     LaplaceOperator(const MappingQ1<dim> &           mapping,
                     const DoFHandler<dim> &          dof_handler,
-                    const QGauss<dim> &              quad,
+                    const QGauss<1> &                quad,
                     const AffineConstraints<number> &constraints,
                     VectorType &                     system_rhs);
 
     void reinit(const MappingQ1<dim> &           mapping,
                 const DoFHandler<dim> &          dof_handler,
-                const QGauss<dim> &              quad,
+                const QGauss<1> &                quad,
                 const AffineConstraints<number> &constraints,
                 VectorType &                     system_rhs);
 
@@ -242,12 +320,12 @@ namespace Step75
 
 
     void do_cell_integral_range(
-      const MatrixFree<dim, number> &              matrix_free,
+      const CUDAWrappers::MatrixFree<dim, number> &matrix_free,
       VectorType &                                 dst,
       const VectorType &                           src,
       const std::pair<unsigned int, unsigned int> &range) const;
 
-    MatrixFree<dim, number> matrix_free;
+    CUDAWrappers::MatrixFree<dim, number> matrix_free;
 
     // To solve the equation system on the coarsest level with an AMG
     // preconditioner, we need an actual system matrix on the coarsest level.
@@ -271,7 +349,7 @@ namespace Step75
   LaplaceOperator<dim, number>::LaplaceOperator(
     const MappingQ1<dim> &           mapping,
     const DoFHandler<dim> &          dof_handler,
-    const QGauss<dim> &              quad,
+    const QGauss<1> &                quad,
     const AffineConstraints<number> &constraints,
     VectorType &                     system_rhs)
   {
@@ -284,7 +362,7 @@ namespace Step75
   void LaplaceOperator<dim, number>::reinit(
     const MappingQ1<dim> &           mapping,
     const DoFHandler<dim> &          dof_handler,
-    const QGauss<dim> &              quad,
+    const QGauss<1> &                quad,
     const AffineConstraints<number> &constraints,
     VectorType &                     system_rhs)
   {
@@ -298,7 +376,7 @@ namespace Step75
     // Set up MatrixFree. At the quadrature points, we only need to evaluate
     // the gradient of the solution and test with the gradient of the shape
     // functions so that we only need to set the flag `update_gradients`.
-    typename MatrixFree<dim, number>::AdditionalData data;
+    typename CUDAWrappers::MatrixFree<dim, number>::AdditionalData data;
     data.mapping_update_flags = update_gradients;
 
     matrix_free.reinit(mapping, dof_handler, constraints, quad, data);
@@ -323,19 +401,20 @@ namespace Step75
 
       this->initialize_dof_vector(system_rhs);
 
-      MatrixFree<dim, number> matrix_free;
+      CUDAWrappers::MatrixFree<dim, number> matrix_free;
       matrix_free.reinit(
         mapping, dof_handler, constraints_without_dbc, quad, data);
 
       matrix_free.initialize_dof_vector(b);
       matrix_free.initialize_dof_vector(x);
 
-      constraints.distribute(x);
 
-      matrix_free.cell_loop(&LaplaceOperator::do_cell_integral_range,
-                            this,
-                            b,
-                            x);
+      VectorTypeHost x_host;
+      x_host.reinit(x);
+      constraints.distribute(x_host);
+      x.reinit(x_host);
+      LocalOperator<dim, p_degree> local_operator;
+      matrix_free.cell_loop(local_operator, b, x);
 
       constraints.set_zero(b);
 
@@ -414,10 +493,11 @@ namespace Step75
     VectorType &diagonal) const
   {
     this->matrix_free.initialize_dof_vector(diagonal);
-    MatrixFreeTools::compute_diagonal(matrix_free,
-                                      diagonal,
-                                      &LaplaceOperator::do_cell_integral_local,
-                                      this);
+    // TODO
+    // MatrixFreeTools::compute_diagonal(matrix_free,
+    //                                   diagonal,
+    //                                   &LaplaceOperator::do_cell_integral_local,
+    //                                   this);
 
     for (auto &i : diagonal)
       i = (std::abs(i) > 1.0e-10) ? (1.0 / i) : 1.0;
@@ -450,13 +530,13 @@ namespace Step75
 
         dsp.compress();
         system_matrix.reinit(dsp);
-
-        MatrixFreeTools::compute_matrix(
-          matrix_free,
-          constraints,
-          system_matrix,
-          &LaplaceOperator::do_cell_integral_local,
-          this);
+        // TODO
+        // MatrixFreeTools::compute_matrix(
+        //   matrix_free,
+        //   constraints,
+        //   system_matrix,
+        //   &LaplaceOperator::do_cell_integral_local,
+        //   this);
       }
 
     return this->system_matrix;
@@ -502,19 +582,19 @@ namespace Step75
   // calls the above function.
   template <int dim, typename number>
   void LaplaceOperator<dim, number>::do_cell_integral_range(
-    const MatrixFree<dim, number> &              matrix_free,
+    const CUDAWrappers::MatrixFree<dim, number> &matrix_free,
     VectorType &                                 dst,
     const VectorType &                           src,
     const std::pair<unsigned int, unsigned int> &range) const
   {
-    FECellIntegrator integrator(matrix_free, range);
+    //  FECellIntegrator integrator(matrix_free, range);
 
-    for (unsigned cell = range.first; cell < range.second; ++cell)
-      {
-        integrator.reinit(cell);
+    //  for (unsigned cell = range.first; cell < range.second; ++cell)
+    //    {
+    //      integrator.reinit(cell);
 
-        do_cell_integral_global(integrator, dst, src);
-      }
+    //      do_cell_integral_global(integrator, dst, src);
+    //    }
   }
 
 
@@ -643,9 +723,10 @@ namespace Step75
     // In case no h-transfer is requested, we provide an empty deleter for the
     // `emplace_back()` function, since the Triangulation of our DoFHandler is
     // an external field and its destructor is called somewhere else.
-    MGLevelObject<DoFHandler<dim>>                     dof_handlers;
-    MGLevelObject<std::unique_ptr<OperatorType>>       operators;
-    MGLevelObject<MGTwoLevelTransfer<dim, VectorType>> transfers;
+    MGLevelObject<DoFHandler<dim>>               dof_handlers;
+    MGLevelObject<std::unique_ptr<OperatorType>> operators;
+    // TODO
+    // MGLevelObject<MGTwoLevelTransfer<dim, VectorType>> transfers;
 
     std::vector<std::shared_ptr<const Triangulation<dim>>>
       coarse_grid_triangulations =
@@ -661,7 +742,7 @@ namespace Step75
 
     dof_handlers.resize(minlevel, maxlevel);
     operators.resize(minlevel, maxlevel);
-    transfers.resize(minlevel, maxlevel);
+   // transfers.resize(minlevel, maxlevel);
 
     // Loop from the minimum (coarsest) to the maximum (finest) level and set up
     // DoFHandler accordingly. We start with the h-levels, where we distribute
@@ -677,51 +758,54 @@ namespace Step75
     // multigrid level. This involves determining constraints with homogeneous
     // Dirichlet boundary conditions, and building the operator just like on the
     // active level.
-    MGLevelObject<AffineConstraints<typename VectorType::value_type>>
-      constraints(minlevel, maxlevel);
-
-    for (unsigned int level = minlevel; level <= maxlevel; ++level)
-      {
-        const auto &dof_handler = dof_handlers[level];
-        auto &      constraint  = constraints[level];
-
-        const IndexSet locally_relevant_dofs =
-          DoFTools::extract_locally_relevant_dofs(dof_handler);
-        constraint.reinit(locally_relevant_dofs);
-
-        DoFTools::make_hanging_node_constraints(dof_handler, constraint);
-        VectorTools::interpolate_boundary_values(
-          mapping, dof_handler, 0, Functions::ZeroFunction<dim>(), constraint);
-        constraint.close();
-
-        VectorType dummy;
-
-        operators[level] = std::make_unique<OperatorType>(
-          mapping, dof_handler, quadrature, constraint, dummy);
-      }
+    //    MGLevelObject<AffineConstraints<typename VectorType::value_type>>
+    //      constraints(minlevel, maxlevel);
+    //
+    //    for (unsigned int level = minlevel; level <= maxlevel; ++level)
+    //      {
+    //        const auto &dof_handler = dof_handlers[level];
+    //        auto &      constraint  = constraints[level];
+    //
+    //        const IndexSet locally_relevant_dofs =
+    //          DoFTools::extract_locally_relevant_dofs(dof_handler);
+    //        constraint.reinit(locally_relevant_dofs);
+    //
+    //        DoFTools::make_hanging_node_constraints(dof_handler, constraint);
+    //        VectorTools::interpolate_boundary_values(
+    //          mapping, dof_handler, 0, Functions::ZeroFunction<dim>(),
+    //          constraint);
+    //        constraint.close();
+    //
+    //        VectorType dummy;
+    //
+    //        // TODO
+    //        // operators[level] = std::make_unique<OperatorType>(
+    //        //   mapping, dof_handler, quadrature, constraint, dummy);
+    //      }
 
     // Set up intergrid operators and collect transfer operators within a single
     // operator as needed by the Multigrid solver class.
-    for (unsigned int level = minlevel; level < maxlevel; ++level)
-      transfers[level + 1].reinit(dof_handlers[level + 1],
-                                  dof_handlers[level],
-                                  constraints[level + 1],
-                                  constraints[level]);
+    // for (unsigned int level = minlevel; level < maxlevel; ++level)
+    //   transfers[level + 1].reinit(dof_handlers[level + 1],
+    //                               dof_handlers[level],
+    //                               constraints[level + 1],
+    //                               constraints[level]);
 
-    MGTransferGlobalCoarsening<dim, VectorType> transfer(
-      transfers, [&](const auto l, auto &vec) {
-        operators[l]->initialize_dof_vector(vec);
-      });
+    // TODO
+    // MGTransferGlobalCoarsening<dim, VectorType> transfer(
+    //   transfers, [&](const auto l, auto &vec) {
+    //     operators[l]->initialize_dof_vector(vec);
+    //   });
 
-    // Finally, proceed to solve the problem with multigrid.
-    mg_solve(solver_control,
-             dst,
-             src,
-             mg_data,
-             dof_handler,
-             system_matrix,
-             operators,
-             transfer);
+    // // Finally, proceed to solve the problem with multigrid.
+    // mg_solve(solver_control,
+    //          dst,
+    //          src,
+    //          mg_data,
+    //          dof_handler,
+    //          system_matrix,
+    //          operators,
+    //          transfer);
   }
 
 
@@ -763,6 +847,7 @@ namespace Step75
 
     MappingQ1<dim>  mapping;
     FE_Q<dim>       fe;
+    QGauss<1>       quadrature_1d;
     QGauss<dim>     quadrature;
     QGauss<dim - 1> face_quadrature;
 
@@ -771,9 +856,10 @@ namespace Step75
 
     AffineConstraints<double> constraints;
 
-    LaplaceOperator<dim, double>               laplace_operator;
-    LinearAlgebra::distributed::Vector<double> locally_relevant_solution;
-    LinearAlgebra::distributed::Vector<double> system_rhs;
+    LaplaceOperator<dim, double> laplace_operator;
+    LinearAlgebra::distributed::Vector<double, MemorySpace::Default>
+      locally_relevant_solution;
+    LinearAlgebra::distributed::Vector<double, MemorySpace::Default> system_rhs;
 
     Vector<float> estimated_error_per_cell;
 
@@ -797,9 +883,10 @@ namespace Step75
     , prm(parameters)
     , triangulation(mpi_communicator)
     , dof_handler(triangulation)
-    , fe(prm.max_p_degree)
-    , quadrature(prm.max_p_degree + 1)
-    , face_quadrature(prm.max_p_degree + 1)
+    , fe(p_degree)
+    , quadrature_1d(p_degree + 1)
+    , quadrature(p_degree + 1)
+    , face_quadrature(p_degree + 1)
     , pcout(std::cout,
             (Utilities::MPI::this_mpi_process(mpi_communicator) == 0))
     , computing_timer(mpi_communicator,
@@ -810,8 +897,6 @@ namespace Step75
     Assert(prm.min_h_level <= prm.max_h_level,
            ExcMessage(
              "Triangulation level limits have been incorrectly set up."));
-    Assert(prm.min_p_degree <= prm.max_p_degree,
-           ExcMessage("FECollection degrees have been incorrectly set up."));
   }
 
 
@@ -909,7 +994,7 @@ namespace Step75
     constraints.close();
 
     laplace_operator.reinit(
-      mapping, dof_handler, quadrature, constraints, system_rhs);
+      mapping, dof_handler, quadrature_1d, constraints, system_rhs);
   }
 
 
@@ -998,7 +1083,8 @@ namespace Step75
   {
     TimerOutput::Scope t(computing_timer, "solve system");
 
-    LinearAlgebra::distributed::Vector<double> completely_distributed_solution;
+    LinearAlgebra::distributed::Vector<double, MemorySpace::Default>
+      completely_distributed_solution;
     laplace_operator.initialize_dof_vector(completely_distributed_solution);
 
     SolverControl solver_control(system_rhs.size(),
@@ -1016,11 +1102,22 @@ namespace Step75
     pcout << "   Solved in " << solver_control.last_step() << " iterations."
           << std::endl;
 
-    constraints.distribute(completely_distributed_solution);
-
-    locally_relevant_solution.copy_locally_owned_data_from(
+    LinearAlgebra::distributed::Vector<double, MemorySpace::Host>
+      completely_distributed_solution_host;
+    completely_distributed_solution_host.reinit(
       completely_distributed_solution);
-    locally_relevant_solution.update_ghost_values();
+
+    constraints.distribute(completely_distributed_solution_host);
+
+    LinearAlgebra::distributed::Vector<double, MemorySpace::Host>
+      locally_relevant_solution_host;
+    locally_relevant_solution_host.reinit(locally_relevant_solution);
+
+    locally_relevant_solution_host.copy_locally_owned_data_from(
+      completely_distributed_solution_host);
+    locally_relevant_solution_host.update_ghost_values();
+
+    locally_relevant_solution.reinit(locally_relevant_solution_host);
   }
 
 
@@ -1155,7 +1252,7 @@ namespace Step75
 
     DataOut<dim> data_out;
     data_out.attach_dof_handler(dof_handler);
-    data_out.add_data_vector(locally_relevant_solution, "solution");
+    // data_out.add_data_vector(locally_relevant_solution, "solution");
     data_out.add_data_vector(fe_degrees, "fe_degree");
     data_out.add_data_vector(subdomain, "subdomain");
     data_out.add_data_vector(estimated_error_per_cell, "error");
