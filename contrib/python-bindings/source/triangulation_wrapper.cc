@@ -789,6 +789,7 @@ namespace python
         static_cast<const Triangulation<dim, spacedim> *>(triangulation);
 
       GridOut::OutputFormat output_format;
+      GridOut       mesh_writer;
       if (format.compare("dx") == 0)
         output_format = GridOut::OutputFormat::dx;
       else if (format.compare("gnuplot") == 0)
@@ -808,11 +809,15 @@ namespace python
       else if (format.compare("vtk") == 0)
         output_format = GridOut::OutputFormat::vtk;
       else if (format.compare("vtu") == 0)
+      {
         output_format = GridOut::OutputFormat::vtu;
+        dealii::GridOutFlags::Vtu flags;
+        flags.serialize_triangulation = true;
+        mesh_writer.set_flags(flags);
+      }
       else
         output_format = GridOut::OutputFormat::none;
 
-      GridOut       mesh_writer;
       std::ofstream ofs(filename);
       mesh_writer.write(*tria, ofs, output_format);
       ofs.close();
